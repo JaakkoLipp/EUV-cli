@@ -1,4 +1,4 @@
-# victoria3-cli
+# Europa Universali V in a termninal
 
 An economic supply & demand market trade simulator game running in CLI, designed as coding & economics practice. Inspired by Paradox Games like Europa Universalis 5 and Victoria 3.
 

@@ -31,6 +31,7 @@ uv run python -m eco_sim
 - Trade routes move goods when profitable.
 - Expand by annexing neutral regions.
 - Optional AI country builds, trades, and expands.
+ - Prices respond to local supply and demand, and trade volumes scale with price spreads.
 
 ## Controls
 
@@ -77,6 +78,13 @@ route add market_south market_north logs 5 0.2 0.05
 ai off
 ai on
 ```
+
+## AI Behavior
+
+- Adjusts taxes based on satisfaction and treasury.
+- Tunes tariffs per good based on local shortages or surpluses.
+- Retargets trade routes to the most profitable option per good.
+- Builds and annexes when affordable.
 
 ## Troubleshooting
 

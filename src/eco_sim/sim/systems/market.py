@@ -9,7 +9,7 @@ from eco_sim.sim.state import GameState
 def update_prices(state: GameState) -> None:
     for market in state.markets.values():
         for good_id, good_state in market.goods.items():
-            supply = good_state.stock
+            supply = max(0.0, good_state.stock)
             new_price = adjusted_price(
                 current=good_state.price,
                 base=good_state.base_price,

@@ -17,6 +17,8 @@ from eco_sim.util.math import clamp
 class CommandResult:
     message: str
     error: bool = False
+    help_text: str = ""
+    output_text: str = ""
     selected_market_id: Optional[str] = None
     selected_country_id: Optional[str] = None
     quit_app: bool = False
@@ -44,14 +46,16 @@ def execute_command(
         return CommandResult(message=f"Advanced {ticks} ticks")
 
     if cmd == "status":
-        return CommandResult(message=status_text(state, selected_country_id))
+        text = status_text(state, selected_country_id)
+        return CommandResult(message=text, output_text=text)
 
     if cmd == "markets":
         lines = ["Markets:"]
         for market_id in sorted(state.markets.keys()):
             market = state.markets[market_id]
             lines.append(f"- {market.id} ({market.name})")
-        return CommandResult(message="\n".join(lines))
+        text = "\n".join(lines)
+        return CommandResult(message=text, output_text=text)
 
     if cmd == "market":
         if not args:
@@ -62,6 +66,7 @@ def execute_command(
         market = state.markets[market_id]
         return CommandResult(
             message=f"Selected market {market_id}",
+            output_text=f"Selected market {market_id}",
             selected_market_id=market_id,
             selected_country_id=market.country_id,
         )
@@ -75,6 +80,7 @@ def execute_command(
             return CommandResult(message="Unknown country id", error=True)
         return CommandResult(
             message=f"Selected country {country_id}",
+            output_text=f"Selected country {country_id}",
             selected_country_id=country_id,
             selected_market_id=country.market_id,
         )
@@ -83,7 +89,8 @@ def execute_command(
         lines = ["Goods:"]
         for good_id, good in sorted(state.goods.items()):
             lines.append(f"- {good_id} ({good.name})")
-        return CommandResult(message="\n".join(lines))
+        text = "\n".join(lines)
+        return CommandResult(message=text, output_text=text)
 
     if cmd == "regions":
         lines = ["Regions:"]
@@ -91,7 +98,21 @@ def execute_command(
             region = state.regions[region_id]
             owner = region.owner_id or "neutral"
             lines.append(f"- {region.id} ({region.name}) owner {owner}")
-        return CommandResult(message="\n".join(lines))
+        text = "\n".join(lines)
+        return CommandResult(message=text, output_text=text)
+
+    if cmd == "buildings":
+        lines = ["Buildings:"]
+        for building_id in sorted(state.buildings.keys()):
+            building = state.buildings[building_id]
+            region = state.regions.get(building.region_id)
+            region_label = region.name if region else building.region_id
+            lines.append(
+                f"- {building.id} {building.type_id} region {region_label} "
+                f"lvl {building.level} {'on' if building.enabled else 'off'}"
+            )
+        text = "\n".join(lines)
+        return CommandResult(message=text, output_text=text)
 
     if cmd == "region":
         if not args:
@@ -102,9 +123,8 @@ def execute_command(
             return CommandResult(message="Unknown region id", error=True)
         outputs = ", ".join(f"{k}:{v:.1f}" for k, v in region.outputs.items())
         buildings = ", ".join(region.building_ids) if region.building_ids else "None"
-        return CommandResult(
-            message=f"{region.id} owner {region.owner_id} outputs [{outputs}] buildings [{buildings}]"
-        )
+        text = f"{region.id} owner {region.owner_id} outputs [{outputs}] buildings [{buildings}]"
+        return CommandResult(message=text, output_text=text)
 
     if cmd == "build":
         if len(args) < 2:
@@ -122,6 +142,7 @@ def execute_command(
         if level <= 0:
             return CommandResult(message="Level must be positive", error=True)
 
+        country = state.countries[selected_country_id]
         building_type = state.building_types[building_type_id]
         if country.treasury < building_type.cost:
             return CommandResult(message="Insufficient treasury for build", error=True)
@@ -138,7 +159,8 @@ def execute_command(
         region.building_ids.append(building_id)
         country.treasury -= building_type.cost
         add_event(state, "build", f"Built {building_type_id} in {region_id}")
-        return CommandResult(message=f"Built {building_type_id} ({building_id})")
+        text = f"Built {building_type_id} ({building_id})"
+        return CommandResult(message=text, output_text=text)
 
     if cmd == "toggle_building":
         if not args:
@@ -150,7 +172,8 @@ def execute_command(
         building.enabled = not building.enabled
         status = "enabled" if building.enabled else "disabled"
         add_event(state, "build", f"Toggled {building_id} {status}")
-        return CommandResult(message=f"Building {building_id} {status}")
+        text = f"Building {building_id} {status}"
+        return CommandResult(message=text, output_text=text)
 
     if cmd == "route" and args and args[0] == "add":
         if len(args) < 7:
@@ -180,7 +203,8 @@ def execute_command(
             cost=max(0.0, cost),
         )
         add_event(state, "trade", f"Added route {route_id}")
-        return CommandResult(message=f"Added route {route_id}")
+        text = f"Added route {route_id}"
+        return CommandResult(message=text, output_text=text)
 
     if cmd == "annex":
         if not args:
@@ -199,7 +223,8 @@ def execute_command(
         country.region_ids.append(region_id)
         country.treasury -= state.annex_cost
         add_event(state, "annex", f"Annexed {region_id} for {country.name}")
-        return CommandResult(message=f"Annexed {region_id}")
+        text = f"Annexed {region_id}"
+        return CommandResult(message=text, output_text=text)
 
     if cmd == "set" and len(args) >= 3 and args[0] == "tax":
         country_id = args[1]
@@ -209,7 +234,8 @@ def execute_command(
             return CommandResult(message="Unknown country id", error=True)
         country.tax_rate = clamp(rate, 0.0, 1.0)
         add_event(state, "policy", f"Set tax for {country.name} to {country.tax_rate:.2f}")
-        return CommandResult(message=f"Tax set to {country.tax_rate:.2f}")
+        text = f"Tax set to {country.tax_rate:.2f}"
+        return CommandResult(message=text, output_text=text)
 
     if cmd == "ai" and args:
         value = args[0].lower()
@@ -217,10 +243,11 @@ def execute_command(
             return CommandResult(message="Usage: ai on|off", error=True)
         state.ai_enabled = value == "on"
         add_event(state, "ai", f"AI set to {value}")
-        return CommandResult(message=f"AI set to {value}")
+        text = f"AI set to {value}"
+        return CommandResult(message=text, output_text=text)
 
     if cmd == "help":
-        return CommandResult(message=_help_text())
+        return CommandResult(message="Help", help_text=_help_text(), output_text=_help_text())
 
     if cmd == "quit":
         return CommandResult(message="Quitting", quit_app=True)
@@ -254,6 +281,7 @@ def _help_text() -> str:
             "- country <country_id>",
             "- goods",
             "- regions | region <id>",
+            "- buildings",
             "- build <region_id> <building_type> [level]",
             "- toggle_building <building_id>",
             "- route add <src_market> <dst_market> <good> <cap> <transport_cost> <tariff_rate>",

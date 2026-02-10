@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from eco_sim.sim.state import GameState, add_event
+from eco_sim.util.math import clamp
 
 
 def execute_trade(state: GameState) -> None:
@@ -14,14 +15,19 @@ def execute_trade(state: GameState) -> None:
         dst_good = dst_market.goods[route.good_id]
 
         tariff_cost = route.tariff * dst_good.price
-        profit_per_unit = dst_good.price - src_good.price - route.cost - tariff_cost
-        if profit_per_unit <= 0.0:
+        effective_src = src_good.price + route.cost + tariff_cost
+        price_spread = dst_good.price - effective_src
+        if price_spread <= 0.0:
             route.last_moved = 0.0
             route.last_profit = 0.0
             route.last_tariff = 0.0
             continue
 
-        moved = min(route.capacity, src_good.stock)
+        move_factor = clamp(price_spread / max(1.0, dst_good.price), 0.0, 1.0)
+        target_move = route.capacity * move_factor
+        reserve = src_good.stock * 0.1
+        available = max(0.0, src_good.stock - reserve)
+        moved = min(target_move, available)
         if moved <= 0.0:
             route.last_moved = 0.0
             route.last_profit = 0.0
@@ -29,11 +35,19 @@ def execute_trade(state: GameState) -> None:
             continue
 
         src_good.stock -= moved
+        if src_good.stock < 0.0:
+            moved += src_good.stock
+            src_good.stock = 0.0
+        if moved <= 0.0:
+            route.last_moved = 0.0
+            route.last_profit = 0.0
+            route.last_tariff = 0.0
+            continue
         dst_good.stock += moved
         src_good.traded_out += moved
         dst_good.traded_in += moved
         route.last_moved = moved
-        route.last_profit = moved * profit_per_unit
+        route.last_profit = moved * price_spread
         route.last_tariff = moved * tariff_cost
 
         dst_country = state.countries[state.markets[route.dst_market_id].country_id]

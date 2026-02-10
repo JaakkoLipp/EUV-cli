@@ -16,9 +16,30 @@ def run_ai(state: GameState) -> None:
     for country_id in state.ai_countries:
         if country_id not in state.countries:
             continue
+        _maybe_tax(state, country_id)
+        _maybe_tariffs(state, country_id)
         _maybe_build(state, country_id)
         _maybe_trade(state, country_id)
         _maybe_annex(state, country_id)
+
+
+def _maybe_tax(state: GameState, country_id: str) -> None:
+    country = state.countries[country_id]
+    satisfaction = _country_satisfaction(state, country_id)
+    target = country.tax_rate
+    if satisfaction < 0.75:
+        target = country.tax_rate - 0.02
+    elif satisfaction > 0.95 and country.treasury < 120.0:
+        target = country.tax_rate + 0.02
+    target = clamp(target, 0.05, 0.35)
+    if abs(target - country.tax_rate) >= 0.005:
+        country.tax_rate = target
+        add_event(
+            state,
+            "ai_tax",
+            f"{country.name} set tax to {country.tax_rate:.2f}",
+            {"country_id": country_id},
+        )
 
 
 def _maybe_build(state: GameState, country_id: str) -> None:
@@ -72,53 +93,70 @@ def _maybe_trade(state: GameState, country_id: str) -> None:
     other_markets = [m for m in state.markets.values() if m.id != market.id]
     if not other_markets:
         return
-
-    best: tuple[str, str, str, float] | None = None
-    best_profit = 0.0
-    for good_id, good_state in market.goods.items():
+    for good_id in market.goods.keys():
+        best = None
+        best_profit = 0.0
         for other in other_markets:
-            other_good = other.goods[good_id]
-            import_cost = other_good.price + 0.2 + (0.05 * good_state.price)
-            profit = good_state.price - import_cost
-            if profit > 0.5 and profit > best_profit:
-                best = (other.id, market.id, good_id, profit)
+            src_good = other.goods[good_id]
+            dst_good = market.goods[good_id]
+            import_cost = src_good.price + 0.2 + (0.05 * dst_good.price)
+            profit = dst_good.price - import_cost
+            if profit > 0.2 and profit > best_profit:
+                best = (other.id, market.id, profit)
                 best_profit = profit
 
-            export_cost = good_state.price + 0.2 + (0.05 * other_good.price)
-            export_profit = other_good.price - export_cost
-            if export_profit > 0.5 and export_profit > best_profit:
-                best = (market.id, other.id, good_id, export_profit)
+            src_good = market.goods[good_id]
+            dst_good = other.goods[good_id]
+            export_cost = src_good.price + 0.2 + (0.05 * dst_good.price)
+            export_profit = dst_good.price - export_cost
+            if export_profit > 0.2 and export_profit > best_profit:
+                best = (market.id, other.id, export_profit)
                 best_profit = export_profit
 
-    if best is None:
-        return
+        if best is None:
+            continue
 
-    src_market_id, dst_market_id, good_id, _profit = best
-    for route in state.routes.values():
-        if (
-            route.src_market_id == src_market_id
-            and route.dst_market_id == dst_market_id
-            and route.good_id == good_id
-        ):
-            return
+        src_market_id, dst_market_id, _profit = best
+        existing = None
+        for route in state.routes.values():
+            if (
+                route.good_id == good_id
+                and (route.src_market_id == market.id or route.dst_market_id == market.id)
+            ):
+                existing = route
+                break
 
-    route_id = next_id(state, "route")
-    state.routes[route_id] = TradeRoute(
-        id=route_id,
-        src_market_id=src_market_id,
-        dst_market_id=dst_market_id,
-        good_id=good_id,
-        capacity=8.0,
-        tariff=0.05,
-        cost=0.2,
-    )
+        if existing and existing.src_market_id == src_market_id and existing.dst_market_id == dst_market_id:
+            continue
 
-    add_event(
-        state,
-        "ai_trade",
-        f"{country.name} added route {route_id} for {good_id}",
-        {"country_id": country_id, "route_id": route_id},
-    )
+        if existing:
+            existing.src_market_id = src_market_id
+            existing.dst_market_id = dst_market_id
+            add_event(
+                state,
+                "ai_trade",
+                f"{country.name} retargeted {existing.id} for {good_id}",
+                {"country_id": country_id, "route_id": existing.id},
+            )
+            continue
+
+        route_id = next_id(state, "route")
+        state.routes[route_id] = TradeRoute(
+            id=route_id,
+            src_market_id=src_market_id,
+            dst_market_id=dst_market_id,
+            good_id=good_id,
+            capacity=8.0,
+            tariff=0.05,
+            cost=0.2,
+        )
+
+        add_event(
+            state,
+            "ai_trade",
+            f"{country.name} added route {route_id} for {good_id}",
+            {"country_id": country_id, "route_id": route_id},
+        )
 
 
 def _maybe_annex(state: GameState, country_id: str) -> None:
@@ -145,3 +183,46 @@ def _maybe_annex(state: GameState, country_id: str) -> None:
         f"{country.name} annexed {best_region.id}",
         {"country_id": country_id, "region_id": best_region.id},
     )
+
+
+def _maybe_tariffs(state: GameState, country_id: str) -> None:
+    country = state.countries[country_id]
+    satisfaction = _country_satisfaction(state, country_id)
+    for route in state.routes.values():
+        dst_market = state.markets[route.dst_market_id]
+        if dst_market.country_id != country_id:
+            continue
+        good_state = dst_market.goods[route.good_id]
+        demand = max(0.01, good_state.demanded)
+        supply = max(0.01, good_state.stock)
+        shortage_ratio = demand / supply
+
+        target = route.tariff
+        if shortage_ratio > 1.2:
+            target = route.tariff - 0.02
+        elif shortage_ratio < 0.8:
+            target = route.tariff + 0.01
+        elif satisfaction > 0.95 and country.treasury < 120.0:
+            target = route.tariff + 0.005
+
+        target = clamp(target, 0.0, 0.2)
+        if abs(target - route.tariff) >= 0.001:
+            route.tariff = target
+            add_event(
+                state,
+                "ai_tariff",
+                f"{country.name} set tariff on {route.id} to {route.tariff:.2f}",
+                {"country_id": country_id, "route_id": route.id},
+            )
+
+
+def _country_satisfaction(state: GameState, country_id: str) -> float:
+    country = state.countries[country_id]
+    total = 0.0
+    count = 0
+    for pop_id in country.pop_ids:
+        total += state.pops[pop_id].satisfaction_avg
+        count += 1
+    if count == 0:
+        return 1.0
+    return total / float(count)

@@ -26,13 +26,13 @@ def default_scenario() -> GameState:
             id="market_north",
             name="North Market",
             country_id="country_north",
-            goods=_make_market_goods(goods, price_bias={"grain": 0.85}),
+            goods=_make_market_goods(goods, price_bias={"grain": 0.85, "planks": 0.9}),
         ),
         "market_south": Market(
             id="market_south",
             name="South Market",
             country_id="country_south",
-            goods=_make_market_goods(goods, price_bias={"grain": 1.15}),
+            goods=_make_market_goods(goods, price_bias={"grain": 1.15, "planks": 1.1}),
         ),
     }
 
@@ -42,7 +42,7 @@ def default_scenario() -> GameState:
             name="North Forest",
             owner_id="country_north",
             market_id="market_north",
-            outputs={"logs": 6.0},
+            outputs={"logs": 5.0},
         ),
         "north_farm": Region(
             id="north_farm",
@@ -56,7 +56,7 @@ def default_scenario() -> GameState:
             name="South Forest",
             owner_id="country_south",
             market_id="market_south",
-            outputs={"logs": 4.0},
+            outputs={"logs": 3.0},
         ),
         "south_mine": Region(
             id="south_mine",
@@ -86,6 +86,12 @@ def default_scenario() -> GameState:
             id="bld_north_mill",
             type_id="lumber_mill",
             region_id="north_forest",
+            level=2,
+        ),
+        "bld_south_mill": BuildingInstance(
+            id="bld_south_mill",
+            type_id="lumber_mill",
+            region_id="south_forest",
             level=1,
         ),
         "bld_south_tools": BuildingInstance(
@@ -96,6 +102,7 @@ def default_scenario() -> GameState:
         ),
     }
     regions["north_forest"].building_ids.append("bld_north_mill")
+    regions["south_forest"].building_ids.append("bld_south_mill")
     regions["south_mine"].building_ids.append("bld_south_tools")
 
     pops = {
@@ -149,7 +156,16 @@ def default_scenario() -> GameState:
             capacity=8.0,
             tariff=0.05,
             cost=0.2,
-        )
+        ),
+        "route_planks": TradeRoute(
+            id="route_planks",
+            src_market_id="market_north",
+            dst_market_id="market_south",
+            good_id="planks",
+            capacity=6.0,
+            tariff=0.05,
+            cost=0.2,
+        ),
     }
 
     state = GameState(
@@ -163,10 +179,10 @@ def default_scenario() -> GameState:
         pops=pops,
         routes=routes,
         events=[],
-        id_counters={"bld": 2, "route": 1},
+        id_counters={"bld": 3, "route": 2},
         annex_cost=50.0,
         ai_enabled=True,
-        ai_countries=["country_south"],
+        ai_countries=["country_north", "country_south"],
         ai_interval=2,
     )
 

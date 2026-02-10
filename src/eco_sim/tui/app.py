@@ -5,7 +5,7 @@ from __future__ import annotations
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.reactive import reactive
-from textual.widgets import DataTable, Input, Static
+from textual.widgets import DataTable, Input, RichLog, Static
 
 from eco_sim.content.scenarios import default_scenario
 from eco_sim.sim.engine import tick
@@ -27,6 +27,8 @@ class EcoSimApp(App):
     selected_market_id = reactive("")
     last_error = reactive("")
     status_message = reactive("")
+    help_text = reactive("")
+    output_text = reactive("")
     revision = reactive(0)
 
     def __init__(self, state: GameState | None = None) -> None:
@@ -42,7 +44,7 @@ class EcoSimApp(App):
                     yield Static(id="regions_panel")
                 with Vertical(id="right"):
                     yield Static(id="trade_panel")
-                    yield Static(id="log_panel")
+                    yield RichLog(id="log_panel", markup=False)
             yield Static(id="footer")
             yield Input(placeholder="Enter command...", id="command_input")
 
@@ -103,6 +105,8 @@ class EcoSimApp(App):
         if result.selected_market_id:
             self.selected_market_id = result.selected_market_id
         self.last_error = result.message if result.error else ""
+        self.help_text = result.help_text
+        self.output_text = result.output_text
         self._bump_revision(result.message if not result.error else "")
 
     def watch_revision(self, _old: int, _new: int) -> None:
@@ -119,7 +123,7 @@ class EcoSimApp(App):
         footer = self.query_one("#footer", Static)
         regions_panel = self.query_one("#regions_panel", Static)
         trade_panel = self.query_one("#trade_panel", Static)
-        log_panel = self.query_one("#log_panel", Static)
+        log_panel = self.query_one("#log_panel", RichLog)
         table = self.query_one("#market_table", DataTable)
 
         if self.selected_country_id:
@@ -129,7 +133,13 @@ class EcoSimApp(App):
             table.clear(columns=False)
             table.add_rows(market_rows(self.state, self.selected_market_id))
         trade_panel.update(trade_text(self.state))
-        log_panel.update(log_text(self.state))
+        log_panel.clear()
+        if self.help_text:
+            log_panel.write(self.help_text)
+        elif self.output_text:
+            log_panel.write(self.output_text)
+        else:
+            log_panel.write(log_text(self.state))
         footer.update(footer_text(self.status_message, self.last_error))
 
     def _ensure_selection(self) -> None:

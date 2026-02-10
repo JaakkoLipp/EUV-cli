@@ -1,0 +1,102 @@
+
+Completed: *Outline data model and content* (1/4)
+
+Created [](file:///mnt/d/Documents/A.Projects/EUV-cli/eco_sim/__init__.py)
+
+Created [](file:///mnt/d/Documents/A.Projects/EUV-cli/eco_sim/__main__.py)
+
+Created [](file:///mnt/d/Documents/A.Projects/EUV-cli/eco_sim)
+
+Data model outline (entities and fields)
+- `GameState`: `tick`, `goods`, `building_types`, `markets`, `regions`, `buildings`, `countries`, `pops`, `routes`, `events`, `id_counters`
+- `GoodDefinition`: `id`, `name`, `base_price`, `price_k`, `min_price_factor`, `max_price_factor`
+- `MarketGoodState`: `price`, `stock`, `base_price`, `price_k`, `min_price`, `max_price`, per-tick stats (`produced`, `demanded`, `bought`, `unmet`, `last_delta`)
+- `Market`: `id`, `name`, `country_id`, `goods` (per-good state)
+- `Region`: `id`, `name`, `owner_id`, `market_id`, `outputs`, `building_ids`
+- `BuildingType`: `id`, `name`, `inputs`, `outputs`, `base_capacity`, `upkeep`
+- `BuildingInstance`: `id`, `type_id`, `region_id`, `level`, `capacity_multiplier`, `enabled`
+- `Pop`: `id`, `country_id`, `size`, `income_per_capita`, `cash`, `needs`, `priority`, `satisfaction`, `satisfaction_avg`
+- `Country`: `id`, `name`, `market_id`, `treasury`, `tax_rate`, `region_ids`, `pop_ids`
+- `TradeRoute`: `id`, `src_market_id`, `dst_market_id`, `good_id`, `capacity`, `tariff`, `cost`, `last_moved`, `last_profit`
+- `Event`: `type`, `message`, `tick`, `payload`
+
+Full file tree
+```
+eco_sim/
+  __init__.py
+  __main__.py
+LICENSE
+main.py
+pyproject.toml
+README.md
+src/
+  cli/
+    commands.py
+    render.py
+  eco_sim/
+    __init__.py
+    __main__.py
+    main.py
+    content/
+      __init__.py
+      buildings.py
+      goods.py
+      scenarios.py
+    sim/
+      __init__.py
+      engine.py
+      state.py
+      rules/
+        __init__.py
+        allocation.py
+        pricing.py
+        recipes.py
+      systems/
+        __init__.py
+        buildings.py
+        consumption.py
+        finance.py
+        market.py
+        production.py
+        trade.py
+    tui/
+      __init__.py
+      app.py
+      commands.py
+      render.py
+      styles.tcss
+    util/
+      __init__.py
+      ids.py
+      math.py
+  main.py
+  market_sim/
+  sim/
+    engine.py
+    market.py
+  util/
+tests/
+  test_sim_core.py
+uv.lock
+```
+
+What I implemented and where
+- Simulation core (tick order, systems, state, rules) is in state.py, engine.py, and systems
+- Data-driven content and default scenario (goods, buildings, markets, regions, pops, routes) is in scenarios.py
+- Textual TUI (layout, reactive updates, command input, tables) is in app.py, render.py, and styles.tcss
+- Command parsing/dispatch is in commands.py
+- A small shim package at __main__.py ensures `python -m eco_sim` works from repo root
+- Minimal tests are in test_sim_core.py
+
+Notes on key mechanics
+- Deterministic tick order is implemented in engine.py
+- Trade uses a profitability check and respects capacity, storing `last_moved` and `last_profit`
+- Pricing clamps to per-good min/max bounds derived from `base_price` in the scenario
+
+I did not run tests here.
+
+If you want to try it now, natural next steps:
+1. Run `python -m eco_sim`
+2. Run `pytest`
+
+Made changes.

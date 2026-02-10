@@ -1,0 +1,62 @@
+Screen {
+    layout: vertical;
+    background: #0f1317;
+    color: #e6e3db;
+}
+
+#header {
+    height: 3;
+    padding: 0 1;
+    background: #1a2026;
+    content-align: left middle;
+}
+
+#main {
+    height: 1fr;
+    padding: 1 1;
+}
+
+#left {
+    width: 1fr;
+    padding-right: 1;
+}
+
+#right {
+    width: 1fr;
+    padding-left: 1;
+}
+
+#market_table {
+    height: 1fr;
+}
+
+#regions_panel {
+    height: 12;
+    background: #141a1f;
+    padding: 1;
+}
+
+#trade_panel {
+    height: 12;
+    background: #141a1f;
+    padding: 1;
+}
+
+#log_panel {
+    height: 1fr;
+    background: #141a1f;
+    padding: 1;
+}
+
+#footer {
+    height: 2;
+    padding: 0 1;
+    background: #1a2026;
+    content-align: left middle;
+}
+
+#command_input {
+    height: 3;
+    padding: 0 1;
+    background: #0f1317;
+}

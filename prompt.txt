@@ -1,0 +1,173 @@
+You are my senior Python engineer and systems designer. Help me build an extendable economic supply & demand market + trade simulator game with a full-screen TUI using Textual (https://textual.textualize.io/).
+
+Primary goal
+- Implement a clean, extensible simulation core (deterministic tick-based) + a Textual TUI that stays on one screen and updates values in place.
+- The project should be ready for iterative extension (more goods, buildings, agents, policies, UI screens) without rewrites.
+
+Tech constraints
+- Python 3.11+
+- Use Textual for the TUI (widgets + layout + CSS). Use Input for command entry and DataTable for market tables. Use reactive state/watchers to update UI when state changes. (Textual Input.Submitted, reactivity/watch methods, containers/layout, DataTable are central.) 
+- Keep simulation logic independent of Textual (no UI imports in sim core).
+- No heavy dependencies beyond Textual; keep everything else standard library.
+- Code quality: typed, strict-ish, no `any`, clear modules, docstrings where helpful, defensive programming, predictable tick order.
+
+Core mechanics to include (in a limited but real way)
+1) Raw resource gathering from owned regions
+- Each region has a resource output profile (per tick) for raw goods.
+- Ownership by a country; output goes to a market (or regional stockpile) via “market access”.
+
+2) Buildings to process resources
+- Implement at least 2 building types with input->output recipes and capacity:
+  - e.g., Lumber Mill: Logs -> Planks
+  - Tool Workshop: Planks + Iron -> Tools (or Planks -> Tools if you want simpler)
+- Buildings should be data-driven (BuildingType definitions), and building instances should track level, capacity multiplier, and enabled/disabled state.
+
+3) Population with varying product demand
+- Pops exist per country (or per region) with:
+  - size, income, cash, and needs (per-capita demand per tick) for multiple goods.
+  - budget-limited purchasing with a priority order (basic needs first).
+  - satisfaction metrics per good and aggregate.
+
+4) Multiple markets and intercountry trade
+- At least 2 countries with separate markets.
+- Trade routes between markets with capacity, tariffs, and transport cost.
+- A simple trade algorithm that moves goods from lower effective price to higher effective price if profitable, respecting capacity and available stock.
+
+5) Expansion of regions
+- Implement a simple mechanism to acquire a new region:
+  - command: `annex <region_id>` or `expand` (choose from a list of neutral regions)
+  - acquisition adds the region to a country and its outputs/buildings become active.
+
+6) Money resource
+- Countries have treasury cash.
+- Pops have cash + income.
+- Implement at least one public revenue mechanism (tax rate * pop income).
+- Optional but good: building upkeep costs and/or wages (keep simple).
+
+Simulation model requirements
+- Tick-based deterministic engine with a fixed order of “systems”.
+- Recommended order:
+  1) Resource production (regions, raw outputs)
+  2) Building processing (consume inputs, produce outputs, capacity constrained)
+  3) Trade (move goods along routes)
+  4) Market pricing update (based on supply vs demand imbalance)
+  5) Allocation/purchasing (pops buy goods given budgets and prices)
+  6) Consumption + satisfaction update
+  7) Finance (income, taxes, treasury updates, upkeep)
+  8) Record events/statistics for UI
+
+- Keep state in a `GameState` dataclass, with ids for entities and dictionaries for storage. Avoid deep OOP; prefer data + systems.
+- Add guardrails:
+  - no negative stock/cash
+  - handle division-by-zero
+  - clamp prices to sensible range based on base_price
+  - keep quantities as floats
+
+Price + allocation (keep it simple but plausible)
+- Each market has per-good:
+  - price, stock, base_price, last_tick_delta
+- Pricing: dynamic adjustment rule based on imbalance; include a “k” sensitivity per good (or global). Clamp.
+- Allocation: pops purchase goods in priority order; bought = min(need, stock, affordable). Subtract stock, subtract pop cash. Track unmet demand.
+
+Data-driven content
+- Put goods and building types in content definitions (Python dicts to start, later can be YAML/JSON).
+- Provide a default scenario with:
+  - Goods: Logs, Planks, Grain (food), Tools, Iron (optional)
+  - Countries: 2
+  - Markets: 2
+  - Regions: 4–6 total (some neutral), each with raw outputs
+  - Pops: 1 per country with different needs/income
+  - Buildings: at least 1 processing building per country to show the chain
+  - 1–2 trade routes
+
+Textual TUI requirements
+- Full-screen TUI, stable layout, values update in place.
+- Use a bottom command Input (enter submits), and a top/bottom status + panels:
+  - Header: current tick, selected country, treasury, key satisfaction
+  - Markets panel: DataTable for selected market (goods: price, stock, produced, demanded, bought, unmet, delta)
+  - Regions panel: list regions owned, outputs, buildings summary
+  - Trade panel: routes summary (capacity used, moved, profit)
+  - Log panel: last N events
+  - Footer: key bindings / help hint
+- Command interface (MVP)
+  - `tick [n]`
+  - `status`
+  - `markets` / `market <id>`
+  - `goods`
+  - `regions` / `region <id>`
+  - `build <region_id> <building_type> [level]`
+  - `toggle_building <building_instance_id>`
+  - `route add <src_market> <dst_market> <good> <cap> <tariff> <cost>`
+  - `annex <region_id>`
+  - `set tax <country_id> <rate>`
+  - `help`
+  - `quit`
+- Key bindings (Textual BINDINGS/actions):
+  - `q` quit
+  - `t` tick 1
+  - `T` tick 10
+  - `tab` cycle panels or selected country/market
+- UI update approach:
+  - Use `reactive` attributes (e.g., selected_country_id, selected_market_id, last_error) and watch methods to refresh widgets.
+  - On Input.Submitted: parse command, execute, then refresh DataTables and text panels.
+  - Keep rendering functions pure: state -> rows/strings.
+
+Project structure (implement this)
+- src/eco_sim/
+    __init__.py
+    main.py                # Textual App entrypoint
+    tui/
+        __init__.py
+        app.py             # Textual App class (compose/layout, event handlers)
+        widgets.py         # small custom widgets (optional)
+        render.py          # state -> table rows / text blocks
+        commands.py        # command parsing + dispatch to sim core
+        styles.tcss        # Textual CSS
+    sim/
+        __init__.py
+        state.py           # dataclasses: GameState, entities, ids
+        engine.py          # tick orchestration, system order
+        systems/
+            production.py
+            buildings.py
+            trade.py
+            market.py
+            consumption.py
+            finance.py
+        rules/
+            pricing.py
+            allocation.py
+            recipes.py
+    content/
+        __init__.py
+        goods.py
+        buildings.py
+        scenarios.py
+    util/
+        __init__.py
+        math.py            # clamp, safe_div
+        ids.py             # id helpers
+
+Deliverables
+1) Provide the full file tree.
+2) Provide complete code for all files needed to run:
+   - `python -m eco_sim` should start the Textual app.
+3) Include a default scenario that demonstrates:
+   - a raw good produced in regions,
+   - processed into an intermediate good via buildings,
+   - pops demanding at least 2 goods,
+   - two markets with different prices,
+   - a trade route that moves goods and changes stocks/prices over time,
+   - expansion via annexing a neutral region.
+4) Include minimal unit tests for sim core (optional but preferred): tick determinism, no negative stock, price clamp, trade capacity respected.
+
+Implementation notes
+- Keep the sim core synchronous; Textual can call `engine.tick(state, n)` directly.
+- Prefer dataclasses + dicts keyed by IDs; keep it simple.
+- Add an `EventLog` list of structured events for UI (type, message, tick, optional payload).
+- Ensure your design makes it easy to add:
+  - more goods, more building types, region-specific market access, multiple pop strata, policies, and more UI screens.
+
+Start by outlining the data model (entities/fields), then implement the sim core, then implement Textual UI (compose/layout/CSS), then wire commands.
+
+Do not invent features beyond the listed mechanics; implement the listed mechanics in a limited but real way, ready for extension.

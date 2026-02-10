@@ -21,7 +21,6 @@ def allocate_and_consume(state: GameState) -> None:
             if need <= 0.0:
                 continue
             market_state = market.goods[good_id]
-            market_state.demanded += need
 
             bought = affordable_purchase(
                 need=need,

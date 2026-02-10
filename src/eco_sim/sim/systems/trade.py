@@ -18,18 +18,26 @@ def execute_trade(state: GameState) -> None:
         if profit_per_unit <= 0.0:
             route.last_moved = 0.0
             route.last_profit = 0.0
+            route.last_tariff = 0.0
             continue
 
         moved = min(route.capacity, src_good.stock)
         if moved <= 0.0:
             route.last_moved = 0.0
             route.last_profit = 0.0
+            route.last_tariff = 0.0
             continue
 
         src_good.stock -= moved
         dst_good.stock += moved
+        src_good.traded_out += moved
+        dst_good.traded_in += moved
         route.last_moved = moved
         route.last_profit = moved * profit_per_unit
+        route.last_tariff = moved * tariff_cost
+
+        dst_country = state.countries[state.markets[route.dst_market_id].country_id]
+        dst_country.treasury += route.last_tariff
 
         add_event(
             state,

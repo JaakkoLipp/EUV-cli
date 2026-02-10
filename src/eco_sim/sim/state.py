@@ -38,6 +38,8 @@ class MarketGoodState:
     demanded: float = 0.0
     bought: float = 0.0
     unmet: float = 0.0
+    traded_in: float = 0.0
+    traded_out: float = 0.0
 
 
 @dataclass
@@ -65,6 +67,7 @@ class BuildingType:
     inputs: Dict[GoodId, float]
     outputs: Dict[GoodId, float]
     base_capacity: float
+    cost: float
     upkeep: float
 
 
@@ -113,6 +116,7 @@ class TradeRoute:
     cost: float
     last_moved: float = 0.0
     last_profit: float = 0.0
+    last_tariff: float = 0.0
 
 
 @dataclass
@@ -136,6 +140,10 @@ class GameState:
     routes: Dict[TradeRouteId, TradeRoute]
     events: List[Event] = field(default_factory=list)
     id_counters: Dict[str, int] = field(default_factory=dict)
+    annex_cost: float = 50.0
+    ai_enabled: bool = False
+    ai_countries: List[CountryId] = field(default_factory=list)
+    ai_interval: int = 1
 
 
 def add_event(state: GameState, event_type: str, message: str, payload: Optional[Dict[str, str]] = None) -> None:

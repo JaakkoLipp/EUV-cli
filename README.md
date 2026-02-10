@@ -30,6 +30,7 @@ uv run python -m eco_sim
 - Pops buy goods based on income and priority needs.
 - Trade routes move goods when profitable.
 - Expand by annexing neutral regions.
+- Optional AI country builds, trades, and expands.
 
 ## Controls
 
@@ -49,14 +50,16 @@ tick [n]
 status
 markets
 market <id>
+country <country_id>
 goods
 regions
 region <id>
 build <region_id> <building_type> [level]
 toggle_building <building_id>
-route add <src_market> <dst_market> <good> <cap> <tariff> <cost>
+route add <src_market> <dst_market> <good> <cap> <transport_cost> <tariff_rate>
 annex <region_id>
 set tax <country_id> <rate>
+ai on|off
 help
 quit
 ```
@@ -70,7 +73,9 @@ markets
 market market_south
 build south_forest lumber_mill 1
 annex frontier_forest
-route add market_south market_north logs 5 0.05 0.2
+route add market_south market_north logs 5 0.2 0.05
+ai off
+ai on
 ```
 
 ## Troubleshooting
@@ -114,3 +119,8 @@ Add a new UI panel:
 
 - Create a new render helper in [src/eco_sim/tui/render.py](src/eco_sim/tui/render.py).
 - Add a widget in [src/eco_sim/tui/app.py](src/eco_sim/tui/app.py) and update `_refresh_all`.
+
+Adjust AI behavior:
+
+- Edit thresholds and weights in [src/eco_sim/ai/controller.py](src/eco_sim/ai/controller.py).
+- Scenario AI settings live in [src/eco_sim/content/scenarios.py](src/eco_sim/content/scenarios.py).

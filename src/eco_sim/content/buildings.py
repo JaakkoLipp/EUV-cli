@@ -13,6 +13,7 @@ def get_building_types() -> dict[str, BuildingType]:
             inputs={"logs": 2.0},
             outputs={"planks": 1.0},
             base_capacity=10.0,
+            cost=40.0,
             upkeep=1.0,
         ),
         "tool_workshop": BuildingType(
@@ -21,6 +22,7 @@ def get_building_types() -> dict[str, BuildingType]:
             inputs={"planks": 2.0, "iron": 1.0},
             outputs={"tools": 1.0},
             base_capacity=6.0,
+            cost=70.0,
             upkeep=2.0,
         ),
     }

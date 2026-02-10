@@ -48,7 +48,16 @@ class EcoSimApp(App):
 
     def on_mount(self) -> None:
         table = self.query_one("#market_table", DataTable)
-        table.add_columns("Good", "Price", "Stock", "Produced", "Demanded", "Bought", "Unmet", "Delta")
+        table.add_columns(
+            "Good",
+            "Price",
+            "Stock",
+            "Produced",
+            "Demanded",
+            "Bought",
+            "Trade Net",
+            "Satisfaction",
+        )
         self._ensure_selection()
         self._refresh_all()
 

@@ -20,9 +20,12 @@ def header_text(state: GameState, country_id: str) -> str:
 
 def market_rows(state: GameState, market_id: str) -> list[tuple[str, str, str, str, str, str, str, str]]:
     market = state.markets[market_id]
+    satisfaction_by_good = _market_satisfaction(state, market_id)
     rows: list[tuple[str, str, str, str, str, str, str, str]] = []
     for good_id in sorted(market.goods.keys()):
         good_state = market.goods[good_id]
+        trade_net = good_state.traded_in - good_state.traded_out
+        satisfaction = satisfaction_by_good.get(good_id, 1.0)
         rows.append(
             (
                 good_id,
@@ -31,8 +34,8 @@ def market_rows(state: GameState, market_id: str) -> list[tuple[str, str, str, s
                 f"{good_state.produced:.2f}",
                 f"{good_state.demanded:.2f}",
                 f"{good_state.bought:.2f}",
-                f"{good_state.unmet:.2f}",
-                f"{good_state.last_delta:+.2f}",
+                f"{trade_net:+.2f}",
+                f"{satisfaction:.2f}",
             )
         )
     return rows
@@ -57,7 +60,8 @@ def trade_text(state: GameState) -> str:
         route = state.routes[route_id]
         lines.append(
             f"- {route.id} {route.src_market_id}->{route.dst_market_id} {route.good_id} "
-            f"cap {route.capacity:.1f} moved {route.last_moved:.1f} profit {route.last_profit:.2f}"
+            f"cap {route.capacity:.1f} moved {route.last_moved:.1f} "
+            f"profit {route.last_profit:.2f} tariff {route.last_tariff:.2f}"
         )
     return "\n".join(lines)
 
@@ -97,3 +101,19 @@ def _country_satisfaction(state: GameState, country_id: str) -> float:
         total += state.pops[pop_id].satisfaction_avg
         count += 1
     return safe_div(total, float(count), 1.0)
+
+
+def _market_satisfaction(state: GameState, market_id: str) -> dict[str, float]:
+    market = state.markets[market_id]
+    country = state.countries[market.country_id]
+    totals: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    for pop_id in country.pop_ids:
+        pop = state.pops[pop_id]
+        for good_id, value in pop.satisfaction.items():
+            totals[good_id] = totals.get(good_id, 0.0) + value
+            counts[good_id] = counts.get(good_id, 0) + 1
+    averages: dict[str, float] = {}
+    for good_id, total in totals.items():
+        averages[good_id] = safe_div(total, float(counts.get(good_id, 1)), 1.0)
+    return averages

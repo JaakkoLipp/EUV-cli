@@ -66,6 +66,19 @@ def execute_command(
             selected_country_id=market.country_id,
         )
 
+    if cmd == "country":
+        if not args:
+            return CommandResult(message="Usage: country <id>", error=True)
+        country_id = args[0]
+        country = state.countries.get(country_id)
+        if country is None:
+            return CommandResult(message="Unknown country id", error=True)
+        return CommandResult(
+            message=f"Selected country {country_id}",
+            selected_country_id=country_id,
+            selected_market_id=country.market_id,
+        )
+
     if cmd == "goods":
         lines = ["Goods:"]
         for good_id, good in sorted(state.goods.items()):
@@ -109,6 +122,10 @@ def execute_command(
         if level <= 0:
             return CommandResult(message="Level must be positive", error=True)
 
+        building_type = state.building_types[building_type_id]
+        if country.treasury < building_type.cost:
+            return CommandResult(message="Insufficient treasury for build", error=True)
+
         building_id = next_id(state, "bld")
         state.buildings[building_id] = BuildingInstance(
             id=building_id,
@@ -119,6 +136,7 @@ def execute_command(
             enabled=True,
         )
         region.building_ids.append(building_id)
+        country.treasury -= building_type.cost
         add_event(state, "build", f"Built {building_type_id} in {region_id}")
         return CommandResult(message=f"Built {building_type_id} ({building_id})")
 
@@ -137,7 +155,7 @@ def execute_command(
     if cmd == "route" and args and args[0] == "add":
         if len(args) < 7:
             return CommandResult(
-                message="Usage: route add <src_market> <dst_market> <good> <cap> <tariff> <cost>",
+                message="Usage: route add <src_market> <dst_market> <good> <cap> <transport_cost> <tariff_rate>",
                 error=True,
             )
         src_market, dst_market, good_id = args[1], args[2], args[3]
@@ -146,8 +164,8 @@ def execute_command(
         if good_id not in state.goods:
             return CommandResult(message="Unknown good id", error=True)
         cap = _parse_float(args[4], 0.0)
-        tariff = _parse_float(args[5], 0.0)
-        cost = _parse_float(args[6], 0.0)
+        cost = _parse_float(args[5], 0.0)
+        tariff = _parse_float(args[6], 0.0)
         if cap <= 0.0:
             return CommandResult(message="Capacity must be positive", error=True)
 
@@ -174,9 +192,12 @@ def execute_command(
         if region.owner_id is not None:
             return CommandResult(message="Region already owned", error=True)
         country = state.countries[selected_country_id]
+        if country.treasury < state.annex_cost:
+            return CommandResult(message="Insufficient treasury to annex", error=True)
         region.owner_id = selected_country_id
         region.market_id = country.market_id
         country.region_ids.append(region_id)
+        country.treasury -= state.annex_cost
         add_event(state, "annex", f"Annexed {region_id} for {country.name}")
         return CommandResult(message=f"Annexed {region_id}")
 
@@ -189,6 +210,14 @@ def execute_command(
         country.tax_rate = clamp(rate, 0.0, 1.0)
         add_event(state, "policy", f"Set tax for {country.name} to {country.tax_rate:.2f}")
         return CommandResult(message=f"Tax set to {country.tax_rate:.2f}")
+
+    if cmd == "ai" and args:
+        value = args[0].lower()
+        if value not in {"on", "off"}:
+            return CommandResult(message="Usage: ai on|off", error=True)
+        state.ai_enabled = value == "on"
+        add_event(state, "ai", f"AI set to {value}")
+        return CommandResult(message=f"AI set to {value}")
 
     if cmd == "help":
         return CommandResult(message=_help_text())
@@ -222,13 +251,15 @@ def _help_text() -> str:
             "- tick [n]",
             "- status",
             "- markets | market <id>",
+            "- country <country_id>",
             "- goods",
             "- regions | region <id>",
             "- build <region_id> <building_type> [level]",
             "- toggle_building <building_id>",
-            "- route add <src_market> <dst_market> <good> <cap> <tariff> <cost>",
+            "- route add <src_market> <dst_market> <good> <cap> <transport_cost> <tariff_rate>",
             "- annex <region_id>",
             "- set tax <country_id> <rate>",
+            "- ai on|off",
             "- help",
             "- quit",
         ]

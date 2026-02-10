@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from eco_sim.sim.state import GameState
+from eco_sim.ai.controller import run_ai
 from eco_sim.sim.systems.buildings import process_buildings
 from eco_sim.sim.systems.consumption import allocate_and_consume
+from eco_sim.sim.systems.demand import compute_demand_intents
 from eco_sim.sim.systems.finance import apply_finance
 from eco_sim.sim.systems.market import update_prices
 from eco_sim.sim.systems.production import produce_resources
@@ -18,9 +20,11 @@ def tick(state: GameState, ticks: int = 1) -> None:
         produce_resources(state)
         process_buildings(state)
         execute_trade(state)
+        compute_demand_intents(state)
         update_prices(state)
         allocate_and_consume(state)
         apply_finance(state)
+        run_ai(state)
 
 
 def _reset_market_stats(state: GameState) -> None:
@@ -31,3 +35,5 @@ def _reset_market_stats(state: GameState) -> None:
             good_state.bought = 0.0
             good_state.unmet = 0.0
             good_state.last_delta = 0.0
+            good_state.traded_in = 0.0
+            good_state.traded_out = 0.0

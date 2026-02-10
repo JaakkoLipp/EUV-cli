@@ -164,6 +164,10 @@ def default_scenario() -> GameState:
         routes=routes,
         events=[],
         id_counters={"bld": 2, "route": 1},
+        annex_cost=50.0,
+        ai_enabled=True,
+        ai_countries=["country_south"],
+        ai_interval=2,
     )
 
     markets["market_north"].goods["grain"].stock = 30.0

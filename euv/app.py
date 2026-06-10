@@ -225,6 +225,19 @@ def handle_key(stdscr, g, pal, ui, k) -> bool:
         if ui.sel_pid is not None:
             ok, msg = engine.recruit(g, g.player, ui.sel_pid)
             ui.status = msg
+    elif k == ord("R"):
+        if ui.sel_pid is not None:
+            done = 0
+            while True:
+                regs = sum(a.regiments for a in g.armies_of(g.player))
+                if regs >= g.force_limit(g.player):
+                    break
+                ok, msg = engine.recruit(g, g.player, ui.sel_pid)
+                if not ok:
+                    break
+                done += 1
+            ui.status = (f"Recruited {done} regiment(s)." if done
+                         else "Cannot recruit (gold/manpower/force limit).")
     elif k == ord("d"):
         if ui.sel_pid is not None:
             ok, msg = engine.develop(g, g.player, ui.sel_pid)

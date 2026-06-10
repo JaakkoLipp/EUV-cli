@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "euv"
+version = "1.0.0"
+description = "EUV: a terminal grand strategy game set in the fictional world of Eryndor"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+classifiers = [
+    "Environment :: Console :: Curses",
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment :: Turn Based Strategy",
+]
+
+[project.scripts]
+euv = "euv.__main__:cli"
+
+[tool.setuptools]
+packages = ["euv"]

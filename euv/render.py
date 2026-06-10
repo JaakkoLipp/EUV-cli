@@ -693,7 +693,7 @@ ECONOMY  [d] develop province (+1 dev)   [b] build building
       barracks manpower, fort defense, temple unrest & prestige.
 
 MILITARY  [Tab] cycle armies  [m] move (pick target, Enter)
-      [r] recruit regiment in selected own province
+      [r] recruit one regiment  [R] recruit up to force limit
       [x] split army  [X] disband army
       Armies siege enemy provinces automatically when parked there.
       Battles favor numbers, morale and defensive terrain.

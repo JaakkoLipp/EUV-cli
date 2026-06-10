@@ -31,11 +31,11 @@ def main(stdscr, seed: int | None = None):
         if choice == "quit":
             return
         if choice == "load":
-            try:
-                g = save.load()
-            except FileNotFoundError:
-                popup_text(stdscr, pal, "Load", "No save file found.")
+            path = pick_save(stdscr, pal)
+            if path is None:
                 continue
+            try:
+                g = save.load(path)
             except Exception as e:
                 popup_text(stdscr, pal, "Load", f"Could not load save: {e}")
                 continue
@@ -52,6 +52,25 @@ def main(stdscr, seed: int | None = None):
             g.say("event", f"You now guide the destiny of "
                            f"{g.nations[tag].name}. ({g.date_str})")
         game_loop(stdscr, g, pal)
+
+
+def pick_save(stdscr, pal) -> str | None:
+    import time
+    cands = []
+    for label, path in (("Manual save", save.SAVE_PATH),
+                        ("Autosave", save.AUTOSAVE_PATH)):
+        if os.path.exists(path):
+            ts = time.strftime("%Y-%m-%d %H:%M",
+                               time.localtime(os.path.getmtime(path)))
+            cands.append((f"{label}  ({ts})", path))
+    if not cands:
+        popup_text(stdscr, pal, "Load", "No save file found.")
+        return None
+    if len(cands) == 1:
+        return cands[0][1]
+    sel = popup_menu(stdscr, pal, "Load which save?",
+                     [c[0] for c in cands])
+    return cands[sel][1] if sel is not None else None
 
 
 # ------------------------------------------------------------------ screens
@@ -153,6 +172,11 @@ def end_turn(stdscr, g, pal, ui, months=1):
     wars_before = len(g.wars_of(g.player))
     for _ in range(months):
         engine.advance_month(g, ai_module=ai)
+        if g.month == 0 and not g.game_over:
+            try:
+                save.save(g, save.AUTOSAVE_PATH)
+            except OSError:
+                pass
         if g.pending_events or g.game_over:
             break
         if len(g.wars_of(g.player)) != wars_before:
@@ -208,6 +232,12 @@ def handle_key(stdscr, g, pal, ui, k) -> bool:
         if ui.sel_aid in g.armies and g.armies[ui.sel_aid].owner == g.player:
             ui.mode = "move"
             ui.status = "Select destination, then Enter."
+        else:
+            ui.status = "Select one of your armies first (Tab)."
+    elif k == ord("G"):
+        if ui.sel_aid in g.armies and g.armies[ui.sel_aid].owner == g.player:
+            ok, msg = engine.hire_general(g, ui.sel_aid)
+            ui.status = msg
         else:
             ui.status = "Select one of your armies first (Tab)."
     elif k == ord("x"):
@@ -504,6 +534,18 @@ def process_popups(stdscr, g, pal):
             handle_alliance_popup(stdscr, g, pal, ev["alliance"])
         elif "cta" in ev:
             handle_cta_popup(stdscr, g, pal, ev["cta"])
+        elif "war_decl" in ev:
+            w = g.wars.get(ev["war_decl"])
+            if w and w.side_of(g.player) == "def":
+                att = ", ".join(g.nations[t].name for t in w.attackers
+                                if t in g.nations)
+                dfn = ", ".join(g.nations[t].name for t in w.defenders
+                                if t in g.nations)
+                popup_text(stdscr, pal, "WAR!",
+                           f"{att} declared war on you!\n\n"
+                           f"Attackers: {att}\nDefenders: {dfn}\n\n"
+                           f"Rally your armies. Warscore comes from "
+                           f"battles and occupations.")
         elif "mission" in ev:
             m = ev["mission"]
             popup_text(stdscr, pal, "Mission Complete!",

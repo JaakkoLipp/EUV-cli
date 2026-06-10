@@ -41,6 +41,14 @@ def _economy(g: Game, tag: str):
     if n.stability < 0:
         engine.raise_stability(g, tag)
 
+    # a war chest deserves a general for the main stack
+    if at_war and n.gold > 90:
+        stacks = g.armies_of(tag)
+        if stacks:
+            best = max(stacks, key=lambda a: a.men)
+            if not best.general:
+                engine.hire_general(g, best.aid)
+
     # keep the army near force limit when at war, ~70% in peace
     fl = g.force_limit(tag)
     regs = sum(a.regiments for a in g.armies_of(tag))
@@ -193,6 +201,8 @@ def _military(g: Game, tag: str):
             for p in g.provinces_of(et):
                 if p.occupier is None:
                     targets.append(p)
+        # liberate own soil under enemy occupation
+        targets += [p for p in g.provinces_of(tag) if p.occupier in enemies]
         if not targets:
             continue
         def value(p):

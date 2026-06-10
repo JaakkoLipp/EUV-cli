@@ -58,6 +58,8 @@ class Army:
     morale: float = data.MORALE_BASE
     move_target: int | None = None  # set when ordered; resolved on tick
     name: str = ""
+    general: int = 0                # battle dice bonus, 0 = no general
+    general_name: str = ""
 
     @property
     def strength(self) -> float:

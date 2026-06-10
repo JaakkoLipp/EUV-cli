@@ -35,6 +35,7 @@ WAR_STAB_HIT_NO_CB = 2     # stability cost declaring without claim
 WAR_STAB_HIT_CB = 0
 
 BATTLE_DICE = 9
+GENERAL_COST = 50          # hire a general for an army
 MORALE_BASE = 3.0
 WAR_EXHAUSTION_MONTHLY = 0.08
 PEACE_GOLD_PER_WARSCORE = 2.2

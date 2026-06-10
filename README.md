@@ -52,9 +52,10 @@ but the real goal is survival and dominance on your own terms.
   farms, markets, barracks, forts and temples, and keep stability up.
   Going bankrupt shatters your realm.
 - **Military** — recruit regiments against a force limit, maneuver army
-  stacks, and let them siege enemy provinces. Battles weigh numbers,
-  morale, dice and defensive terrain. Manpower is a slow-recovering pool;
-  war exhaustion erodes morale the longer you fight.
+  stacks, hire generals, and let armies siege enemy provinces (or retake
+  your own). Battles weigh numbers, morale, generals, dice and defensive
+  terrain. Manpower is a slow-recovering pool; war exhaustion erodes
+  morale the longer you fight. The game autosaves every January.
 - **Diplomacy** — opinions, alliances, truces and calls to arms.
   Fabricate claims to get cheap casus belli. Warscore from occupations
   and battles buys provinces and gold at the peace table.
@@ -76,6 +77,7 @@ but the real goal is survival and dominance on your own terms.
 | `Space` | End turn (1 month) — `>` plays up to 12 months |
 | `m` | Move selected army (pick destination, `Enter`) |
 | `x` / `X` | Split / disband army |
+| `G` | Hire a general for the selected army |
 | `r` / `R` | Recruit one regiment / up to force limit |
 | `d` / `b` | Develop province / build building |
 | `c` | Fabricate claim on a border province |

@@ -347,9 +347,11 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
         put(f" {a.regiments} regiments, {a.men:,} men")
         put(f" Morale {a.morale:.1f}/{engine.morale_max(g, a.owner):.1f}"
             f"  at {g.provinces[a.location].name}")
+        if a.general:
+            put(f" {a.general_name} (skill {a.general})", pal.ui(5))
         if a.move_target is not None:
             put(f" Moving to {g.provinces[a.move_target].name}", pal.ui(3))
-        put(" [m]ove [x]split [X]disband", curses.A_DIM)
+        put(" [m]ove [x]split [X]disband [G]eneral", curses.A_DIM)
         put("-" * iw, curses.A_DIM)
 
     # --- selected province
@@ -694,7 +696,8 @@ ECONOMY  [d] develop province (+1 dev)   [b] build building
 
 MILITARY  [Tab] cycle armies  [m] move (pick target, Enter)
       [r] recruit one regiment  [R] recruit up to force limit
-      [x] split army  [X] disband army
+      [x] split army  [X] disband army  [G] hire a general
+      Generals add their skill to every battle die roll.
       Armies siege enemy provinces automatically when parked there.
       Battles favor numbers, morale and defensive terrain.
 

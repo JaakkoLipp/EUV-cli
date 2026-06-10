@@ -7,6 +7,7 @@ import os
 from .model import Army, Game, Nation, Province, War
 
 SAVE_PATH = os.path.expanduser("~/.euv_save.json")
+AUTOSAVE_PATH = os.path.expanduser("~/.euv_autosave.json")
 
 
 def save(g: Game, path: str = SAVE_PATH):
@@ -45,6 +46,7 @@ def save(g: Game, path: str = SAVE_PATH):
             "aid": a.aid, "owner": a.owner, "location": a.location,
             "regiments": a.regiments, "men": a.men, "morale": a.morale,
             "move_target": a.move_target, "name": a.name,
+            "general": a.general, "general_name": a.general_name,
         } for a in g.armies.values()],
         "wars": [{
             "wid": w.wid, "attackers": w.attackers, "defenders": w.defenders,
@@ -91,7 +93,8 @@ def load(path: str = SAVE_PATH) -> Game:
         g.nations[n.tag] = n
     for d in s["armies"]:
         a = Army(d["aid"], d["owner"], d["location"], d["regiments"],
-                 d["men"], d["morale"], d["move_target"], d["name"])
+                 d["men"], d["morale"], d["move_target"], d["name"],
+                 d.get("general", 0), d.get("general_name", ""))
         g.armies[a.aid] = a
     for d in s["wars"]:
         w = War(d["wid"], d["attackers"], d["defenders"], d["cb_target"],

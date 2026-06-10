@@ -163,6 +163,21 @@ def disband_army(g: Game, aid: int):
     return True, f"{a.name} disbanded."
 
 
+def hire_general(g: Game, aid: int):
+    a = g.armies[aid]
+    n = g.nations[a.owner]
+    if a.general:
+        return False, f"{a.general_name} already commands this army."
+    if n.gold < data.GENERAL_COST:
+        return False, f"Need {data.GENERAL_COST} gold."
+    n.gold -= data.GENERAL_COST
+    # skill 1-5, weighted toward the middle
+    a.general = 1 + g.rng.randint(0, 2) + g.rng.randint(0, 2)
+    first = g.rng.choice(data.RULER_FIRST[n.culture])
+    a.general_name = f"General {first}"
+    return True, f"{a.general_name} (skill {a.general}) takes command."
+
+
 def raise_stability(g: Game, tag: str):
     n = g.nations[tag]
     if n.stability >= data.MAX_STAB:
@@ -280,6 +295,8 @@ def declare_war(g: Game, tag: str, target: str,
         g.pending_events.append(
             {"cta": {"wid": w.wid, "side": player_cta,
                      "caller": tag if player_cta == "att" else target}})
+    if any(g.nations[x].is_player for x in defenders):
+        g.pending_events.append({"war_decl": w.wid})
     if coalition:
         w.name = f"Coalition War against {t.name}"
     for x in attackers:
@@ -526,6 +543,8 @@ def _movement_phase(g: Game):
                 b.regiments += a.regiments
                 b.men += a.men
                 b.morale = min(a.morale, b.morale)
+                if a.general > b.general:
+                    b.general, b.general_name = a.general, a.general_name
                 if a.move_target and not b.move_target:
                     b.move_target = a.move_target
                 del g.armies[a.aid]
@@ -577,9 +596,11 @@ def _resolve_battle(g: Game, pid: int, side_a: list[Army],
             break
         if max(b.morale for b in side_b) <= 0:
             break
-        roll_a = rng.randint(0, data.BATTLE_DICE) + \
+        gen_a = max((x.general for x in side_a), default=0)
+        gen_b = max((x.general for x in side_b), default=0)
+        roll_a = rng.randint(0, data.BATTLE_DICE) + gen_a + \
             (terr_bonus if not b_defends else 0)
-        roll_b = rng.randint(0, data.BATTLE_DICE) + \
+        roll_b = rng.randint(0, data.BATTLE_DICE) + gen_b + \
             (terr_bonus if b_defends else 0)
         dmg_to_b = (roll_a + 4) * men_a * 0.006
         dmg_to_a = (roll_b + 4) * men_b * 0.006
@@ -654,29 +675,37 @@ def _siege_phase(g: Game):
         by_loc.setdefault(a.location, []).append(a)
     for pid, armies in by_loc.items():
         p = g.provinces[pid]
-        hostiles = [a for a in armies if g.at_war_with(a.owner, p.owner)]
+        controller = p.occupier or p.owner
+        # armies contesting the current controller (incl. owner retaking)
+        hostiles = [a for a in armies
+                    if a.owner != controller
+                    and (g.at_war_with(a.owner, controller)
+                         or (p.occupier and a.owner == p.owner))]
         if not hostiles:
-            if p.sieging and p.occupier is None:
+            if p.sieging:
                 p.sieging, p.siege_progress = None, 0.0
             continue
         a = max(hostiles, key=lambda a: a.men)
         side_tag = a.owner
-        if p.occupier and not g.at_war_with(side_tag, p.owner):
-            continue
-        if p.occupier:
-            continue   # already taken
         if p.sieging != side_tag:
             p.sieging, p.siege_progress = side_tag, 0.0
-        gain = max(2.0, 9 + g.rng.uniform(0, 10) - p.fort_level * 4
+        fort = p.fort_level if not p.occupier else 1   # occupiers hold poorly
+        gain = max(2.0, 9 + g.rng.uniform(0, 10) - fort * 4
                    + min(6.0, a.regiments * 0.7))
         p.siege_progress += gain
         if p.siege_progress >= 100:
-            p.occupier = side_tag
             p.siege_progress = 0.0
             p.sieging = None
-            g.nations[p.owner].war_exhaustion = min(
-                15.0, g.nations[p.owner].war_exhaustion + 0.6)
-            g.say("siege", f"{g.nations[side_tag].name} occupies {p.name}!")
+            if side_tag == p.owner or side_tag in g.nations[p.owner].allies:
+                p.occupier = None
+                g.say("siege", f"{g.nations[p.owner].name} retakes "
+                               f"{p.name}!")
+            else:
+                p.occupier = side_tag
+                g.nations[p.owner].war_exhaustion = min(
+                    15.0, g.nations[p.owner].war_exhaustion + 0.6)
+                g.say("siege",
+                      f"{g.nations[side_tag].name} occupies {p.name}!")
 
 
 def _economy_phase(g: Game):

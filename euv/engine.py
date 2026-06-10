@@ -1,0 +1,795 @@
+"""Game engine: player/AI actions, monthly tick, combat, sieges, peace."""
+from __future__ import annotations
+
+from collections import deque
+
+from . import data
+from .model import Army, Game, Nation, Province, War
+
+
+# ================================================================== queries
+
+def can_pass(g: Game, tag: str, pid: int) -> bool:
+    owner = g.provinces[pid].owner
+    if owner == tag or owner in g.nations[tag].allies:
+        return True
+    if g.at_war_with(tag, owner):
+        return True
+    # co-belligerents: anyone on our side in any of our wars
+    for w in g.wars_of(tag):
+        side = w.attackers if w.side_of(tag) == "att" else w.defenders
+        if owner in side:
+            return True
+    return False
+
+
+def find_path(g: Game, tag: str, start: int, goal: int) -> list[int] | None:
+    """BFS path through passable provinces. Returns [start..goal] or None."""
+    if start == goal:
+        return [start]
+    prev = {start: -1}
+    q = deque([start])
+    while q:
+        cur = q.popleft()
+        for nb in sorted(g.provinces[cur].neighbors):
+            if nb in prev:
+                continue
+            if nb != goal and not can_pass(g, tag, nb):
+                continue
+            prev[nb] = cur
+            if nb == goal:
+                path = [goal]
+                while path[-1] != start:
+                    path.append(prev[path[-1]])
+                return path[::-1]
+            q.append(nb)
+    return None
+
+
+def morale_max(g: Game, tag: str) -> float:
+    n = g.nations[tag]
+    return max(1.0, data.MORALE_BASE * (1 - 0.03 * n.war_exhaustion)
+               + 0.1 * max(0, n.stability))
+
+
+def army_upkeep(g: Game, tag: str) -> float:
+    regs = sum(a.regiments for a in g.armies_of(tag))
+    fl = g.force_limit(tag)
+    over = max(0, regs - fl)
+    return ((regs - over) * data.REGIMENT_UPKEEP
+            + over * data.REGIMENT_UPKEEP * data.OVER_LIMIT_MULT)
+
+
+def monthly_balance(g: Game, tag: str) -> tuple[float, float, float]:
+    """(income, expenses, net) for the ledger."""
+    stab_mult = 1 + 0.03 * g.nations[tag].stability
+    income = sum(p.tax_income() for p in g.provinces_of(tag)) * stab_mult
+    forts = sum(1 for p in g.provinces_of(tag) if "fort" in p.buildings)
+    expense = army_upkeep(g, tag) + forts * data.FORT_UPKEEP * 2
+    n = g.nations[tag]
+    if n.gold < 0:
+        expense += -n.gold * 0.02   # interest on debt
+    return income, expense, income - expense
+
+
+def score(g: Game, tag: str) -> float:
+    n = g.nations[tag]
+    return g.total_dev(tag) * 2 + n.prestige + max(0.0, n.gold) / 20
+
+
+# =========================================================== player actions
+# All return (ok, message). They are also used by the AI.
+
+def develop(g: Game, tag: str, pid: int):
+    p, n = g.provinces[pid], g.nations[tag]
+    if p.owner != tag:
+        return False, "Not your province."
+    cost = p.dev_cost()
+    if n.gold < cost:
+        return False, f"Need {cost} gold."
+    n.gold -= cost
+    p.dev += 1
+    return True, f"{p.name} developed to {p.dev}."
+
+
+def build(g: Game, tag: str, pid: int, key: str):
+    p, n = g.provinces[pid], g.nations[tag]
+    if p.owner != tag:
+        return False, "Not your province."
+    if key in p.buildings:
+        return False, "Already built."
+    if len(p.buildings) >= data.MAX_BUILDINGS:
+        return False, "No building slots left."
+    name, cost, *_ = data.BUILDINGS[key]
+    if n.gold < cost:
+        return False, f"Need {cost} gold."
+    n.gold -= cost
+    p.buildings.append(key)
+    return True, f"{name} built in {p.name}."
+
+
+def recruit(g: Game, tag: str, pid: int, regiments: int = 1):
+    p, n = g.provinces[pid], g.nations[tag]
+    if p.owner != tag:
+        return False, "Not your province."
+    if p.occupier:
+        return False, "Province is occupied."
+    cost = data.RECRUIT_COST * regiments
+    men = data.RECRUIT_MANPOWER * regiments
+    if n.gold < cost:
+        return False, f"Need {cost} gold."
+    if n.manpower < men:
+        return False, f"Need {men} manpower."
+    n.gold -= cost
+    n.manpower -= men
+    here = [a for a in g.armies_of(tag) if a.location == pid]
+    if here:
+        here[0].regiments += regiments
+        here[0].men += men
+    else:
+        g.new_army(tag, pid, regiments)
+    return True, f"Recruited {regiments} regiment(s) in {p.name}."
+
+
+def move_army(g: Game, aid: int, target: int):
+    a = g.armies[aid]
+    if target == a.location:
+        a.move_target = None
+        return True, "Order cancelled."
+    path = find_path(g, a.owner, a.location, target)
+    if not path:
+        return False, "No route there (need own/allied/enemy territory)."
+    a.move_target = target
+    return True, f"Moving to {g.provinces[target].name}."
+
+
+def split_army(g: Game, aid: int):
+    a = g.armies[aid]
+    if a.regiments < 2:
+        return False, "Too small to split."
+    half = a.regiments // 2
+    men_half = a.men * half // a.regiments
+    a.regiments -= half
+    a.men -= men_half
+    b = g.new_army(a.owner, a.location, half, men_half)
+    b.morale = a.morale
+    return True, f"Split off {b.name}."
+
+
+def disband_army(g: Game, aid: int):
+    a = g.armies.pop(aid)
+    n = g.nations[a.owner]
+    n.manpower = min(g.manpower_max(a.owner), n.manpower + a.men * 0.5)
+    return True, f"{a.name} disbanded."
+
+
+def raise_stability(g: Game, tag: str):
+    n = g.nations[tag]
+    if n.stability >= data.MAX_STAB:
+        return False, "Stability is already maximal."
+    cost = data.STAB_COST + 40 * (n.stability + 3)
+    if n.gold < cost:
+        return False, f"Need {cost} gold."
+    n.gold -= cost
+    n.stability += 1
+    return True, f"Stability raised to {n.stability:+d}."
+
+
+def fabricate_claim(g: Game, tag: str, pid: int):
+    n = g.nations[tag]
+    p = g.provinces[pid]
+    if p.owner == tag:
+        return False, "You own this province."
+    if pid in n.claims:
+        return False, "Already claimed."
+    if n.fabricating:
+        return False, "Spies are already busy elsewhere."
+    own_border = any(g.provinces[nb].owner == tag for nb in p.neighbors)
+    if not own_border:
+        return False, "Can only claim provinces bordering your realm."
+    if n.gold < data.CLAIM_COST:
+        return False, f"Need {data.CLAIM_COST} gold."
+    n.gold -= data.CLAIM_COST
+    n.fabricating = (pid, data.CLAIM_MONTHS)
+    return True, f"Spies sent to {p.name} ({data.CLAIM_MONTHS} months)."
+
+
+def improve_relations(g: Game, tag: str, other: str):
+    n = g.nations[tag]
+    if n.gold < data.IMPROVE_COST:
+        return False, f"Need {data.IMPROVE_COST} gold."
+    n.gold -= data.IMPROVE_COST
+    o = g.nations[other]
+    o.opinions[tag] = min(100.0, o.opinion_of(tag) + 12)
+    return True, f"Envoys sent to {o.name} (+12 opinion)."
+
+
+def offer_alliance(g: Game, tag: str, other: str):
+    n, o = g.nations[tag], g.nations[other]
+    if other in n.allies:
+        return False, "Already allied."
+    if g.at_war_with(tag, other):
+        return False, "You are at war with them."
+    # AI acceptance: opinion + relative strength considerations
+    accept = (o.opinion_of(tag) >= 25
+              and o.ae.get(tag, 0) < 30
+              and not o.in_coalition_against == tag)
+    if g.nations[other].is_player:
+        accept = True   # player decides via popup; handled by UI
+    if not accept:
+        return False, f"{o.name} declines (opinion {o.opinion_of(tag):.0f})."
+    n.allies.add(other)
+    o.allies.add(tag)
+    n.opinions[other] = n.opinion_of(other) + 10
+    o.opinions[tag] = o.opinion_of(tag) + 10
+    g.say("diplo", f"{n.name} and {o.name} form an alliance.")
+    return True, f"{o.name} accepts the alliance!"
+
+
+def break_alliance(g: Game, tag: str, other: str):
+    n, o = g.nations[tag], g.nations[other]
+    n.allies.discard(other)
+    o.allies.discard(tag)
+    o.opinions[tag] = o.opinion_of(tag) - 40
+    g.say("diplo", f"{n.name} breaks its alliance with {o.name}.")
+    return True, f"Alliance with {o.name} dissolved."
+
+
+def declare_war(g: Game, tag: str, target: str,
+                coalition: list[str] | None = None):
+    n, t = g.nations[tag], g.nations[target]
+    if g.at_war_with(tag, target):
+        return False, "Already at war."
+    if g.truce_between(tag, target):
+        return False, "A truce forbids war."
+    if target in n.allies:
+        break_alliance(g, tag, target)
+    claim = next((pid for pid in n.claims
+                  if g.provinces[pid].owner == target), None)
+    if claim is None:
+        n.stability = max(data.MIN_STAB,
+                          n.stability - data.WAR_STAB_HIT_NO_CB)
+    attackers = [tag]
+    defenders = [target]
+    if coalition:
+        attackers += [c for c in coalition if c != tag]
+    else:
+        for ally in sorted(n.allies):
+            a = g.nations[ally]
+            if a.alive and not g.at_war_with(ally, target) \
+                    and not g.truce_between(ally, target) \
+                    and (a.is_player or a.opinion_of(tag) >= 0):
+                attackers.append(ally)
+    for ally in sorted(t.allies):
+        a = g.nations[ally]
+        if a.alive and ally not in attackers \
+                and not any(g.at_war_with(ally, x) for x in attackers):
+            defenders.append(ally)
+    w = g.new_war(attackers, defenders, claim)
+    if coalition:
+        w.name = f"Coalition War against {t.name}"
+    for x in attackers:
+        for y in defenders:
+            g.nations[y].opinions[x] = g.nations[y].opinion_of(x) - 50
+    g.say("war", f"{n.name} declares war on {t.name}! "
+                 f"({'+'.join(attackers)} vs {'+'.join(defenders)})")
+    return True, f"War declared on {t.name}!"
+
+
+# ----------------------------------------------------------------- warscore
+
+def occupation_score(g: Game, w: War) -> float:
+    """Net occupation warscore from the attackers' perspective."""
+    def side_occ(holders: list[str], victims: list[str]) -> float:
+        total_dev = sum(g.total_dev(v) for v in victims) or 1
+        got = 0.0
+        for v in victims:
+            for p in g.provinces_of(v):
+                if p.occupier in holders:
+                    worth = p.dev / total_dev * 70
+                    if p.pid == g.nations[v].capital:
+                        worth += 10
+                    if p.pid == w.cb_target:
+                        worth += 10
+                    got += worth
+        return got
+    return side_occ(w.attackers, w.defenders) - side_occ(w.defenders,
+                                                         w.attackers)
+
+
+def update_warscore(g: Game, w: War):
+    w.score = max(-100.0, min(100.0,
+                              occupation_score(g, w) + w.battles_score))
+
+
+def province_peace_cost(g: Game, w: War, taker: str, pid: int) -> float:
+    p = g.provinces[pid]
+    cost = p.dev * 1.6
+    if pid in g.nations[taker].claims or pid == w.cb_target:
+        cost *= 0.6
+    if pid == g.nations[p.owner].capital:
+        cost *= 1.5
+    return cost
+
+
+def offer_peace(g: Game, w: War, proposer: str, demand_pids: list[int],
+                demand_gold: float,
+                beneficiary: str | None = None) -> tuple[bool, str]:
+    """proposer offers terms; beneficiary (default proposer) takes the spoils.
+
+    beneficiary != proposer means the proposer is surrendering.
+    Empty demands = white peace. Returns (accepted, message).
+    """
+    beneficiary = beneficiary or proposer
+    recipient = (w.defenders if w.side_of(proposer) == "att"
+                 else w.attackers)[0]
+    cost = sum(province_peace_cost(g, w, beneficiary, pid)
+               for pid in demand_pids)
+    cost += max(0.0, demand_gold) / data.PEACE_GOLD_PER_WARSCORE
+    rec = g.nations[recipient]
+    if rec.is_player:
+        g.pending_events.append({
+            "peace": {"wid": w.wid, "proposer": proposer,
+                      "beneficiary": beneficiary, "pids": demand_pids,
+                      "gold": demand_gold, "cost": cost}})
+        return False, "Offer sent to their court..."
+    rec_score = w.score_for(recipient)
+    ben_score = w.score_for(beneficiary)
+    desperate = (rec.war_exhaustion > 8 or not g.armies_of(recipient)
+                 or rec.manpower < 500)
+    if w.side_of(beneficiary) == w.side_of(recipient):
+        # we are being offered the spoils (enemy surrenders)
+        accept = (cost >= rec_score - 15 or rec.war_exhaustion > 6
+                  or rec_score < 5)
+        if not demand_pids and demand_gold <= 0:   # white peace
+            accept = rec_score < 15 or rec.war_exhaustion > 6
+        if not accept:
+            return False, (f"{rec.name} rejects the offer — they demand "
+                           f"more ({rec_score:.0f}% warscore).")
+    else:
+        # demands against the recipient
+        threshold = ben_score - (0 if desperate else 12)
+        if ben_score >= 99:
+            threshold = 100   # total victory: anything goes
+        if not demand_pids and demand_gold <= 0:
+            if rec_score > 20 and not desperate:
+                return False, (f"{rec.name} rejects white peace — "
+                               f"they are winning.")
+        elif cost > threshold:
+            return False, (f"{rec.name} rejects the terms ({cost:.0f}% "
+                           f"asked, {ben_score:.0f}% warscore).")
+    execute_peace(g, w, beneficiary, demand_pids, demand_gold)
+    return True, "Peace concluded."
+
+
+def execute_peace(g: Game, w: War, winner: str, pids: list[int],
+                  gold: float):
+    win_side = w.attackers if w.side_of(winner) == "att" else w.defenders
+    lose_side = w.defenders if w.side_of(winner) == "att" else w.attackers
+    loser_leader = lose_side[0]
+    terms = []
+    for pid in pids:
+        p = g.provinces[pid]
+        old = p.owner
+        _transfer_province(g, pid, winner)
+        terms.append(p.name)
+        # aggressive expansion among everyone who isn't the winner
+        for tag, n in g.nations.items():
+            if tag == winner or not n.alive:
+                continue
+            dist = 1.0 if any(g.provinces[nb].owner == tag
+                              for nb in p.neighbors) else 0.5
+            n.ae[winner] = n.ae.get(winner, 0) + \
+                data.AE_PER_DEV_TAKEN * p.dev * dist
+            n.opinions[winner] = n.opinion_of(winner) - p.dev * dist
+        if old in g.nations:
+            g.nations[winner].prestige += p.dev * 0.5
+    if gold > 0:
+        lo = g.nations[loser_leader]
+        pay = min(gold, max(0.0, lo.gold))
+        lo.gold -= gold
+        g.nations[winner].gold += pay
+        terms.append(f"{gold:.0f} gold")
+    # lift occupations between the two sides, set truces
+    for tag in win_side + lose_side:
+        for p in g.provinces_of(tag):
+            if p.occupier and (p.occupier in win_side
+                               or p.occupier in lose_side):
+                p.occupier = None
+                p.siege_progress = 0.0
+                p.sieging = None
+    until = g.abs_month + data.TRUCE_YEARS * 12
+    for a in win_side:
+        for b in lose_side:
+            if a in g.nations and b in g.nations:
+                g.nations[a].truces[b] = until
+                g.nations[b].truces[a] = until
+    for tag in win_side + lose_side:
+        if tag in g.nations:
+            g.nations[tag].war_exhaustion = max(
+                0.0, g.nations[tag].war_exhaustion - 2)
+    g.wars.pop(w.wid, None)   # may already be gone if a side was annexed
+    _send_strays_home(g, win_side + lose_side)
+    what = ", ".join(terms) if terms else "white peace"
+    g.say("war", f"Peace in the {w.name}: "
+                 f"{g.nations[winner].name} gains {what}." if terms else
+                 f"The {w.name} ends in a white peace.")
+
+
+def _transfer_province(g: Game, pid: int, to: str):
+    p = g.provinces[pid]
+    old = p.owner
+    p.owner = to
+    p.occupier = None
+    p.siege_progress = 0.0
+    p.sieging = None
+    p.unrest = 4.0
+    g.nations[to].claims.discard(pid)
+    if old in g.nations:
+        n = g.nations[old]
+        if not g.provinces_of(old):
+            _eliminate(g, old, to)
+        elif pid == n.capital:
+            n.capital = max(g.provinces_of(old), key=lambda q: q.dev).pid
+
+
+def _eliminate(g: Game, tag: str, by: str):
+    n = g.nations[tag]
+    n.alive = False
+    for a in list(g.armies.values()):
+        if a.owner == tag:
+            del g.armies[a.aid]
+    for w in list(g.wars.values()):
+        for side in (w.attackers, w.defenders):
+            if tag in side:
+                side.remove(tag)
+        if not w.attackers or not w.defenders:
+            del g.wars[w.wid]
+    for o in g.nations.values():
+        o.allies.discard(tag)
+        o.truces.pop(tag, None)
+        if o.in_coalition_against == tag:
+            o.in_coalition_against = None
+    g.say("war", f"*** {n.name} has been annexed by {g.nations[by].name}! ***")
+    if n.is_player:
+        g.game_over = (f"{n.name} has fallen. "
+                       f"Your realm was annexed by {g.nations[by].name}.")
+
+
+def _send_strays_home(g: Game, tags: list[str]):
+    for a in list(g.armies.values()):
+        if a.owner not in tags:
+            continue
+        if not can_pass(g, a.owner, a.location):
+            n = g.nations[a.owner]
+            a.location = n.capital
+            a.move_target = None
+
+
+# ================================================================= the tick
+
+def advance_month(g: Game, ai_module=None):
+    """Advance the world by one month. ai_module avoids a circular import."""
+    g.month += 1
+    if g.month >= 12:
+        g.month = 0
+        g.year += 1
+    _movement_phase(g)
+    _battle_phase(g)
+    _siege_phase(g)
+    _economy_phase(g)
+    _attrition_and_recovery(g)
+    _diplomacy_phase(g)
+    for w in g.wars.values():
+        update_warscore(g, w)
+    if ai_module:
+        ai_module.run_all(g)
+    for w in g.wars.values():
+        update_warscore(g, w)
+    _events_phase(g)
+    _check_end(g)
+
+
+def _movement_phase(g: Game):
+    for a in sorted(g.armies.values(), key=lambda a: a.aid):
+        if a.aid not in g.armies or a.move_target is None:
+            continue
+        if a.move_target == a.location:
+            a.move_target = None
+            continue
+        path = find_path(g, a.owner, a.location, a.move_target)
+        if not path or len(path) < 2:
+            a.move_target = None
+            continue
+        a.location = path[1]
+        if a.location == a.move_target:
+            a.move_target = None
+        # auto-merge with friendly army present
+        for b in list(g.armies.values()):
+            if (b.aid != a.aid and b.owner == a.owner
+                    and b.location == a.location):
+                b.regiments += a.regiments
+                b.men += a.men
+                b.morale = min(a.morale, b.morale)
+                if a.move_target and not b.move_target:
+                    b.move_target = a.move_target
+                del g.armies[a.aid]
+                break
+
+
+def _battle_phase(g: Game):
+    # find provinces holding mutually hostile armies
+    by_loc: dict[int, list[Army]] = {}
+    for a in g.armies.values():
+        by_loc.setdefault(a.location, []).append(a)
+    for pid, armies in by_loc.items():
+        tags = {a.owner for a in armies}
+        if len(tags) < 2:
+            continue
+        # group into two sides by the first war found
+        sides: tuple[list[Army], list[Army]] | None = None
+        for w in g.wars.values():
+            att = [a for a in armies if a.owner in w.attackers]
+            dfn = [a for a in armies if a.owner in w.defenders]
+            if att and dfn:
+                sides = (att, dfn)
+                break
+        if not sides:
+            continue
+        _resolve_battle(g, pid, sides[0], sides[1])
+
+
+def _resolve_battle(g: Game, pid: int, side_a: list[Army],
+                    side_b: list[Army]):
+    p = g.provinces[pid]
+    rng = g.rng
+    terr_bonus = data.TERRAIN[p.terrain][3]
+    # defender = side whose war side controls/owns the field; approximation:
+    # owner's side defends, else the side that arrived first (lower aid)
+    def is_def(side):
+        return any(a.owner == p.owner or p.owner in g.nations[a.owner].allies
+                   for a in side)
+    b_defends = is_def(side_b) and not is_def(side_a)
+    name_a = g.nations[side_a[0].owner].name
+    name_b = g.nations[side_b[0].owner].name
+    men_a0, men_b0 = sum(a.men for a in side_a), sum(b.men for b in side_b)
+    for _round in range(8):
+        men_a = sum(a.men for a in side_a)
+        men_b = sum(b.men for b in side_b)
+        if men_a <= 0 or men_b <= 0:
+            break
+        if max(a.morale for a in side_a) <= 0:
+            break
+        if max(b.morale for b in side_b) <= 0:
+            break
+        roll_a = rng.randint(0, data.BATTLE_DICE) + \
+            (terr_bonus if not b_defends else 0)
+        roll_b = rng.randint(0, data.BATTLE_DICE) + \
+            (terr_bonus if b_defends else 0)
+        dmg_to_b = (roll_a + 4) * men_a * 0.006
+        dmg_to_a = (roll_b + 4) * men_b * 0.006
+        _apply_casualties(side_a, dmg_to_a, roll_b)
+        _apply_casualties(side_b, dmg_to_b, roll_a)
+    men_a = sum(a.men for a in side_a)
+    men_b = sum(b.men for b in side_b)
+    mor_a = max((a.morale for a in side_a), default=0)
+    mor_b = max((b.morale for b in side_b), default=0)
+    a_wins = (mor_a > 0 and men_a > 0) and (mor_b <= 0 or men_b <= 0 or
+                                            mor_a >= mor_b)
+    winner, loser = (side_a, side_b) if a_wins else (side_b, side_a)
+    wname, lname = (name_a, name_b) if a_wins else (name_b, name_a)
+    lost_w = (men_a0 - men_a) if a_wins else (men_b0 - men_b)
+    lost_l = (men_b0 - men_b) if a_wins else (men_a0 - men_a)
+    for a in loser:
+        _retreat(g, a)
+    # warscore from the battle
+    for w in g.wars.values():
+        if any(a.owner in w.attackers for a in winner) and \
+           any(a.owner in w.defenders for a in loser):
+            w.battles_score = min(40.0, w.battles_score + lost_l / 800)
+            break
+        if any(a.owner in w.defenders for a in winner) and \
+           any(a.owner in w.attackers for a in loser):
+            w.battles_score = max(-40.0, w.battles_score - lost_l / 800)
+            break
+    for nlist, exh in ((winner, 0.3), (loser, 0.8)):
+        for a in nlist:
+            g.nations[a.owner].war_exhaustion = min(
+                15.0, g.nations[a.owner].war_exhaustion + exh)
+    g.say("battle",
+          f"Battle of {p.name}: {wname} defeats {lname} "
+          f"({lost_w:,} vs {lost_l:,} casualties).")
+    for a in list(winner) + list(loser):
+        if a.men < 50 and a.aid in g.armies:
+            del g.armies[a.aid]
+
+
+def _apply_casualties(side: list[Army], dmg: float, enemy_roll: int):
+    total = sum(a.men for a in side) or 1
+    for a in side:
+        share = a.men / total
+        a.men = max(0, int(a.men - dmg * share))
+        a.morale = max(0.0, a.morale - (0.45 + enemy_roll * 0.06) * share
+                       * len(side))
+
+
+def _retreat(g: Game, a: Army):
+    if a.aid not in g.armies:
+        return
+    a.men = int(a.men * 0.85)
+    a.morale = 0.4
+    a.move_target = None
+    if a.men < 50:
+        del g.armies[a.aid]
+        return
+    own = [p.pid for p in g.provinces_of(a.owner) if p.pid != a.location]
+    if not own:
+        del g.armies[a.aid]
+        return
+    here = g.provinces[a.location].center
+    dest = min(own, key=lambda pid:
+               (g.provinces[pid].center[0] - here[0]) ** 2
+               + (g.provinces[pid].center[1] - here[1]) ** 2)
+    a.location = dest
+
+
+def _siege_phase(g: Game):
+    by_loc: dict[int, list[Army]] = {}
+    for a in g.armies.values():
+        by_loc.setdefault(a.location, []).append(a)
+    for pid, armies in by_loc.items():
+        p = g.provinces[pid]
+        hostiles = [a for a in armies if g.at_war_with(a.owner, p.owner)]
+        if not hostiles:
+            if p.sieging and p.occupier is None:
+                p.sieging, p.siege_progress = None, 0.0
+            continue
+        a = max(hostiles, key=lambda a: a.men)
+        side_tag = a.owner
+        if p.occupier and not g.at_war_with(side_tag, p.owner):
+            continue
+        if p.occupier:
+            continue   # already taken
+        if p.sieging != side_tag:
+            p.sieging, p.siege_progress = side_tag, 0.0
+        gain = max(2.0, 9 + g.rng.uniform(0, 10) - p.fort_level * 4
+                   + min(6.0, a.regiments * 0.7))
+        p.siege_progress += gain
+        if p.siege_progress >= 100:
+            p.occupier = side_tag
+            p.siege_progress = 0.0
+            p.sieging = None
+            g.nations[p.owner].war_exhaustion = min(
+                15.0, g.nations[p.owner].war_exhaustion + 0.6)
+            g.say("siege", f"{g.nations[side_tag].name} occupies {p.name}!")
+
+
+def _economy_phase(g: Game):
+    for tag, n in g.nations.items():
+        if not n.alive:
+            continue
+        income, expense, net = monthly_balance(g, tag)
+        n.gold += net
+        # deep debt punishes stability
+        if n.gold < -50 and g.rng.random() < 0.12:
+            if n.stability > data.MIN_STAB:
+                n.stability -= 1
+                if n.is_player:
+                    g.say("econ", "Bankruptcy looms! Stability falls.")
+        # full bankruptcy: debt wiped, realm shattered for years
+        if n.gold < -max(100.0, income * 36):
+            n.gold = 0.0
+            n.stability = data.MIN_STAB
+            n.prestige -= 25
+            for a in g.armies_of(tag):
+                a.regiments = max(1, a.regiments // 2)
+                a.men = min(a.men, a.regiments * data.RECRUIT_MANPOWER)
+                a.morale = 0.5
+            g.say("econ", f"{n.name} declares bankruptcy! Its armies "
+                          f"desert and the realm is in chaos.")
+
+
+def _attrition_and_recovery(g: Game):
+    for tag, n in g.nations.items():
+        if not n.alive:
+            continue
+        at_war = bool(g.wars_of(tag))
+        regen = g.manpower_max(tag) / (data.MANPOWER_REGEN_YEARS * 12)
+        regen *= max(0.3, 1 - 0.05 * n.war_exhaustion)
+        n.manpower = min(g.manpower_max(tag), n.manpower + regen)
+        if at_war:
+            n.war_exhaustion = min(15.0, n.war_exhaustion
+                                   + data.WAR_EXHAUSTION_MONTHLY)
+        else:
+            n.war_exhaustion = max(0.0, n.war_exhaustion - 0.15)
+        if n.fabricating:
+            pid, left = n.fabricating
+            if g.provinces[pid].owner == tag:
+                n.fabricating = None
+            elif left <= 1:
+                n.fabricating = None
+                n.claims.add(pid)
+                if n.is_player:
+                    g.say("diplo",
+                          f"Claim fabricated on {g.provinces[pid].name}!")
+            else:
+                n.fabricating = (pid, left - 1)
+    # army reinforcement & morale recovery
+    for a in g.armies.values():
+        n = g.nations[a.owner]
+        full = a.regiments * data.RECRUIT_MANPOWER
+        if a.men < full and n.manpower > 0:
+            add = min(full - a.men, int(full * 0.08) + 20, int(n.manpower))
+            a.men += add
+            n.manpower -= add
+        cap = morale_max(g, a.owner)
+        hostile = g.at_war_with(a.owner, g.provinces[a.location].owner)
+        a.morale = min(cap, a.morale + (0.2 if hostile else 0.4))
+    # unrest decay
+    for p in g.provinces.values():
+        p.unrest = max(0.0, p.unrest - 0.1
+                       - (0.05 * g.nations[p.owner].stability))
+
+
+def _diplomacy_phase(g: Game):
+    for tag, n in g.nations.items():
+        if not n.alive:
+            continue
+        for other in list(n.opinions):
+            v = n.opinions[other]
+            n.opinions[other] = v - min(0.5, max(-0.5, v * 0.01))
+        for other in list(n.ae):
+            n.ae[other] = max(0.0, n.ae[other]
+                              - data.AE_DECAY_PER_YEAR / 12)
+        # coalition membership expires as AE decays
+        if n.in_coalition_against:
+            t = n.in_coalition_against
+            if n.ae.get(t, 0) < data.COALITION_AE_THRESHOLD * 0.6 \
+                    or not g.nations[t].alive:
+                n.in_coalition_against = None
+
+
+def _events_phase(g: Game):
+    from . import data as d
+    for tag, n in g.nations.items():
+        if not n.alive or g.rng.random() > 0.05:
+            continue
+        ev = g.rng.choices(d.EVENTS, weights=[e[3] for e in d.EVENTS])[0]
+        if n.is_player:
+            g.pending_events.append({"event": ev, "tag": tag})
+        else:
+            choice = g.rng.randrange(len(ev[4]))
+            apply_event_choice(g, tag, ev, choice)
+
+
+def apply_event_choice(g: Game, tag: str, ev, choice: int):
+    n = g.nations[tag]
+    label, fx = ev[4][choice]
+    n.gold += fx.get("gold", 0)
+    n.stability = max(data.MIN_STAB, min(data.MAX_STAB,
+                                         n.stability + fx.get("stability", 0)))
+    n.prestige += fx.get("prestige", 0)
+    if "manpower_frac" in fx:
+        n.manpower = max(0.0, n.manpower * (1 + fx["manpower_frac"]))
+    if "ae" in fx:
+        for o in g.nations.values():
+            if o.tag != tag and o.alive:
+                o.ae[tag] = o.ae.get(tag, 0) + fx["ae"] * 0.3
+    if fx.get("dev_capital"):
+        g.provinces[n.capital].dev += fx["dev_capital"]
+    if n.is_player:
+        g.say("event", f"{ev[1]}: {label}")
+
+
+def _check_end(g: Game):
+    n = g.nations.get(g.player)
+    if n and not n.alive and not g.game_over:
+        g.game_over = "Your nation has been destroyed."
+    # prestige slowly decays toward zero; temples add a trickle
+    for tag, nat in g.nations.items():
+        if not nat.alive:
+            continue
+        nat.prestige *= 0.999
+        temples = sum(1 for p in g.provinces_of(tag)
+                      if "temple" in p.buildings)
+        nat.prestige += temples * 0.1 / 12

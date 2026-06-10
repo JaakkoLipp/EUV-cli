@@ -280,7 +280,8 @@ def declare_war(g: Game, tag: str, target: str,
                     and not g.truce_between(ally, target):
                 if a.is_player:
                     player_cta = "att"
-                elif a.opinion_of(tag) >= 0:
+                elif a.opinion_of(tag) >= 0 and not g.wars_of(ally):
+                    # busy allies decline offensive calls
                     attackers.append(ally)
     for ally in sorted(t.allies):
         a = g.nations[ally]

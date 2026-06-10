@@ -1,0 +1,17 @@
+#!/bin/bash
+# Full test suite: engine balance sims + scripted TUI sessions.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+echo "== engine simulations =="
+for seed in 7 13 42 99; do
+    python3 tests/sim.py "$seed" 100 > /dev/null && echo "sim seed $seed ok"
+done
+echo "== TUI: scripted session =="
+python3 tests/tui_driver.py | tail -1
+echo "== TUI: war & peace flow =="
+python3 tests/tui_war.py | tail -1
+echo "== TUI: campaign playthrough =="
+python3 tests/tui_campaign.py | tail -1
+echo "== TUI: fuzz =="
+python3 tests/tui_fuzz.py 1 | tail -1
+echo "ALL SUITES PASSED"

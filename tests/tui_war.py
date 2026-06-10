@@ -42,6 +42,8 @@ def main():
     expect(d, "New Game", "title screen")
     d.send_key(KEY_DOWN, 0.2)
     d.send_key(ENTER, 0.8)                     # Load Game
+    if "Load which save" in d.text():
+        d.send_key(ENTER, 0.8)                 # manual save is listed first
     expect(d, "AT WAR", "loaded at-war game")
     d.send("D", 0.5)
     expect(d, "Diplomacy with...", "diplomacy list")

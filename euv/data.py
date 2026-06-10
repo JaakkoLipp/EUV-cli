@@ -134,7 +134,7 @@ EVENTS = [
     ("minister", "A Gifted Minister",
      "A brilliant administrator offers their services to the crown.", 8,
      [("Appoint them (+25 gold now, +2 prestige)", {"gold": 25, "prestige": 2}),
-      ("The old guard objects — refuse", {})]),
+      ("The old guard objects; refuse", {})]),
     ("border", "Border Incident",
      "Soldiers clashed at a disputed frontier crossing.", 7,
      [("Demand apologies (+3 prestige, +5 AE)", {"prestige": 3, "ae": 5}),

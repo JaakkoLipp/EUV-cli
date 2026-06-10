@@ -205,7 +205,7 @@ class Game:
         return men + n.manpower * 0.5 + n.gold * 8
 
     def war_name(self, attacker: str, defender: str) -> str:
-        return (f"{self.nations[attacker].name}–"
+        return (f"{self.nations[attacker].name}-"
                 f"{self.nations[defender].name} War")
 
     def new_army(self, owner: str, location: int, regiments: int,

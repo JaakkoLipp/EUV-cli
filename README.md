@@ -101,9 +101,11 @@ nations across five cultures, then named and flavoured. The engine is
 fully headless-testable; the curses UI sits on top.
 
 ```sh
+bash tests/run_all.sh           # everything below
 python3 tests/sim.py 7 100      # 100-year all-AI balance simulation
 python3 tests/tui_driver.py     # scripted TUI session in a pty (pyte)
 python3 tests/tui_war.py        # war & peace-negotiation UI flow
+python3 tests/tui_campaign.py   # full campaign: march, siege, peace
 python3 tests/tui_fuzz.py       # 350 random keys must not crash
 ```
 

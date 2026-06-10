@@ -376,7 +376,7 @@ def offer_peace(g: Game, w: War, proposer: str, demand_pids: list[int],
         if not demand_pids and demand_gold <= 0:   # white peace
             accept = rec_score < 15 or rec.war_exhaustion > 6
         if not accept:
-            return False, (f"{rec.name} rejects the offer — they demand "
+            return False, (f"{rec.name} rejects the offer; they demand "
                            f"more ({rec_score:.0f}% warscore).")
     else:
         # demands against the recipient
@@ -385,7 +385,7 @@ def offer_peace(g: Game, w: War, proposer: str, demand_pids: list[int],
             threshold = 100   # total victory: anything goes
         if not demand_pids and demand_gold <= 0:
             if rec_score > 20 and not desperate:
-                return False, (f"{rec.name} rejects white peace — "
+                return False, (f"{rec.name} rejects white peace; "
                                f"they are winning.")
         elif cost > threshold:
             return False, (f"{rec.name} rejects the terms ({cost:.0f}% "

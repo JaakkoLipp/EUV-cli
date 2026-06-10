@@ -638,4 +638,6 @@ def handle_cta_popup(stdscr, g, pal, cta):
 
 
 def run(seed: int | None = None):
+    import locale
+    locale.setlocale(locale.LC_ALL, "")
     curses.wrapper(main, seed)

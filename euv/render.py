@@ -178,7 +178,7 @@ def draw_map(win, g: Game, pal: Palette, ui):
     win.box()
     title = {1: "POLITICAL", 2: "TERRAIN", 3: "DEVELOPMENT",
              4: "DIPLOMATIC"}[ui.mapmode]
-    safe_addstr(win, 0, 2, f"[ Eryndor — {title} ]", curses.A_BOLD)
+    safe_addstr(win, 0, 2, f"[ Eryndor - {title} ]", curses.A_BOLD)
     for y in range(g.height):
         for x in range(g.width):
             ch, attr = cell_attr(g, pal, ui, x, y)

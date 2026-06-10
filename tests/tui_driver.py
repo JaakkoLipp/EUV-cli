@@ -3,6 +3,11 @@
 Usage: python3 tests/tui_driver.py [script]
 Feeds a scripted key sequence to the game, dumping the screen at
 checkpoints, and fails loudly on any crash/traceback.
+
+Note: pyte does not implement scroll-region scrolling (CSI S within
+DECSTBM margins), which ncurses uses to optimize the message log.
+Screen dumps may show stale tails on log lines; real terminals render
+them correctly. Assertions should target stable UI text, not the log.
 """
 import os
 import pty

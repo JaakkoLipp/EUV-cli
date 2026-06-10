@@ -65,7 +65,15 @@ class Driver:
         print("=" * 75)
 
     def alive(self) -> bool:
-        pid, status = os.waitpid(self.pid, os.WNOHANG)
+        if getattr(self, "_dead", False):
+            return False
+        try:
+            pid, _ = os.waitpid(self.pid, os.WNOHANG)
+        except ChildProcessError:
+            self._dead = True
+            return False
+        if pid != 0:
+            self._dead = True
         return pid == 0
 
     def quit(self):
@@ -122,8 +130,8 @@ def main():
         sys.exit("FAIL: process died after end turn")
     # advance a year
     d.send(">", 2.0)
-    d.send_key(ENTER, 0.4)   # dismiss possible popup
-    d.send_key(ENTER, 0.4)
+    for _ in range(6):       # dismiss any queued popups
+        d.send_key(ENTER, 0.3)
     if not d.alive():
         d.dump("CRASHED after year advance")
         sys.exit("FAIL: process died after year advance")

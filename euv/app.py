@@ -6,8 +6,8 @@ import os
 
 from . import ai, data, engine, render, save, worldgen
 from .model import Game
-from .render import (popup_menu, popup_text, popup_toggle_list, safe_addstr,
-                     show_help, show_ledger, show_log)
+from .render import (popup_menu, popup_text, popup_toggle_list, read_key,
+                     safe_addstr, show_help, show_ledger, show_log)
 
 
 class UIState:
@@ -22,6 +22,8 @@ class UIState:
 
 def main(stdscr, seed: int | None = None):
     curses.curs_set(0)
+    if hasattr(curses, "set_escdelay"):
+        curses.set_escdelay(25)   # snappy ESC; sequences arrive in one burst
     stdscr.keypad(True)
     pal = render.Palette()
     while True:
@@ -45,6 +47,8 @@ def main(stdscr, seed: int | None = None):
                 continue
             g.player = tag
             g.nations[tag].is_player = True
+            engine._missions_phase(g)   # initial objectives
+            g.pending_events.clear()    # no fanfare before the first turn
             g.say("event", f"You now guide the destiny of "
                            f"{g.nations[tag].name}. ({g.date_str})")
         game_loop(stdscr, g, pal)
@@ -72,7 +76,7 @@ def title_screen(stdscr, pal) -> str:
                     f"{render.MIN_COLS}x{render.MIN_ROWS}. Resize and press "
                     f"a key.")
         stdscr.refresh()
-        stdscr.getch()
+        read_key(stdscr)
         return title_screen(stdscr, pal)
     for i, line in enumerate(TITLE_ART.splitlines()):
         safe_addstr(stdscr, 2 + i, max(0, (w - len(line)) // 2), line,
@@ -117,7 +121,7 @@ def game_loop(stdscr, g: Game, pal):
                        g.game_over + f"\n\nFinal score: "
                        f"{engine.score(g, g.player):.0f}")
             return
-        k = stdscr.getch()
+        k = read_key(stdscr)
         ui.status = ""
         if not handle_key(stdscr, g, pal, ui, k):
             return
@@ -487,6 +491,11 @@ def process_popups(stdscr, g, pal):
             handle_alliance_popup(stdscr, g, pal, ev["alliance"])
         elif "cta" in ev:
             handle_cta_popup(stdscr, g, pal, ev["cta"])
+        elif "mission" in ev:
+            m = ev["mission"]
+            popup_text(stdscr, pal, "Mission Complete!",
+                       f"{m['desc']}\n\nReward: {m.get('gold', 0)} gold, "
+                       f"{m.get('prestige', 0)} prestige.")
 
 
 def handle_event_popup(stdscr, g, pal, ev):

@@ -20,6 +20,7 @@ def save(g: Game, path: str = SAVE_PATH):
         "next_army": g._next_army, "next_war": g._next_war,
         "game_over": g.game_over,
         "pending_events": g.pending_events,
+        "missions": g.missions,
         "log": g.log[-120:],
         "provinces": [{
             "pid": p.pid, "name": p.name, "terrain": p.terrain,
@@ -69,6 +70,7 @@ def load(path: str = SAVE_PATH) -> Game:
     g._next_army, g._next_war = s["next_army"], s["next_war"]
     g.game_over = s["game_over"]
     g.pending_events = s.get("pending_events", [])
+    g.missions = s.get("missions", [])
     g.log = [tuple(e) for e in s["log"]]
     for d in s["provinces"]:
         p = Province(d["pid"], d["name"], d["terrain"], d["culture"],

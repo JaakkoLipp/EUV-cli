@@ -101,6 +101,28 @@ class Palette:
                 "econ": self.ui(5), "event": self.ui(6)}.get(cat, 0)
 
 
+def read_key(win) -> int:
+    """getch that also decodes raw ESC-sequences for arrows/backtab.
+
+    Some terminals send normal-mode sequences (ESC [ B) even when
+    ncurses expects application mode (ESC O B); handle both.
+    """
+    k = win.getch()
+    if k != 27:
+        return k
+    win.nodelay(True)
+    try:
+        k2 = win.getch()
+        if k2 in (ord("["), ord("O")):
+            k3 = win.getch()
+            return {ord("A"): curses.KEY_UP, ord("B"): curses.KEY_DOWN,
+                    ord("C"): curses.KEY_RIGHT, ord("D"): curses.KEY_LEFT,
+                    ord("Z"): curses.KEY_BTAB}.get(k3, 27)
+        return 27   # bare escape (k2 == -1) or unknown sequence
+    finally:
+        win.nodelay(False)
+
+
 def safe_addstr(win, y, x, s, attr=0):
     h, w = win.getmaxyx()
     if y < 0 or y >= h or x >= w:
@@ -212,10 +234,15 @@ def draw_map(win, g: Game, pal: Palette, ui):
         if sel:
             attr |= curses.A_REVERSE
         safe_addstr(win, spot[1] + 1, spot[0] + 1, marker, attr)
-    # cursor
+    # cursor: invert whatever is rendered beneath it
     cx, cy = ui.cursor
-    ch, attr = cell_attr(g, pal, ui, cx, cy)
-    safe_addstr(win, cy + 1, cx + 1, ch, attr | curses.A_REVERSE)
+    try:
+        under = win.inch(cy + 1, cx + 1)
+        ch = chr(under & 0xFF)
+        attr = under & ~0xFF
+        win.addstr(cy + 1, cx + 1, ch, attr ^ curses.A_REVERSE)
+    except (curses.error, ValueError):
+        pass
     if ui.mode == "move":
         safe_addstr(win, g.height + 1, 2,
                     "[ MOVE: select destination, Enter confirm, Esc cancel ]",
@@ -232,19 +259,23 @@ def draw_topbar(scr, g: Game, pal: Palette):
     fl = sum(a.regiments for a in g.armies_of(g.player))
     flmax = g.force_limit(g.player)
     parts = [
-        f" {n.name} ({n.ruler})",
+        f" {n.name}",
         f"{g.date_str}",
         f"Gold {n.gold:,.0f} ({net:+.1f})",
         f"MP {n.manpower:,.0f}",
         f"Stab {n.stability:+d}",
-        f"Prestige {n.prestige:.0f}",
+        f"Pres {n.prestige:.0f}",
         f"Army {fl}/{flmax}",
     ]
+    text = " | ".join(parts)
     wars = g.wars_of(g.player)
     if wars:
-        parts.append(f"AT WAR ({len(wars)})")
-    text = " | ".join(parts)
-    safe_addstr(scr, 0, 0, text[:w - 1], pal.ui(1) | curses.A_BOLD)
+        war_txt = f"  AT WAR ({len(wars)}) "
+        text = text[:w - 1 - len(war_txt) - 6]
+        safe_addstr(scr, 0, 0, text, pal.ui(1) | curses.A_BOLD)
+        safe_addstr(scr, 0, len(text), war_txt, pal.ui(7) | curses.A_BOLD)
+    else:
+        safe_addstr(scr, 0, 0, text[:w - 1], pal.ui(1) | curses.A_BOLD)
     max_ae = max((o.ae.get(g.player, 0) for o in g.nations.values()
                   if o.alive and o.tag != g.player), default=0)
     if max_ae > data.COALITION_AE_THRESHOLD * 0.7:
@@ -303,6 +334,10 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
                  if o.alive and o.in_coalition_against == g.player]
     if coalition:
         put("COALITION: " + ", ".join(coalition), pal.ui(7))
+    if g.missions:
+        put("Missions:", curses.A_BOLD)
+        for m in g.missions:
+            put(f" - {m['desc']}", pal.ui(6))
     put("-" * iw, curses.A_DIM)
 
     # --- selected army
@@ -372,6 +407,23 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
                 rel.append("IN COALITION VS YOU")
             if rel:
                 put(" " + "  ".join(rel), pal.ui(3))
+        put("-" * iw, curses.A_DIM)
+
+    # --- great powers, pinned to the bottom of the panel
+    from . import engine as _e
+    rows_gp = sorted((t for t, n in g.nations.items() if n.alive),
+                     key=lambda t: -_e.score(g, t))
+    block = min(6, len(rows_gp)) + 1
+    start = h - 1 - block
+    if start > row[0]:
+        row[0] = start
+        put("Great Powers:", curses.A_BOLD)
+        for i, t in enumerate(rows_gp[:6]):
+            n = g.nations[t]
+            attr = pal.nation_fg(n.color)
+            if t == g.player:
+                attr |= curses.A_REVERSE
+            put(f" {i + 1}. {n.name:12} {_e.score(g, t):5.0f}", attr)
 
 
 # ---------------------------------------------------------------- log bars
@@ -434,7 +486,7 @@ def popup_menu(scr, pal: Palette, title: str, options: list[str],
         safe_addstr(win, height - 1, 2, "[Enter] select  [Esc] cancel",
                     curses.A_DIM)
         win.refresh()
-        k = win.getch()
+        k = read_key(win)
         if k in (27, ord("q")):
             return None
         if k in (curses.KEY_UP, ord("k")):
@@ -470,7 +522,7 @@ def popup_text(scr, pal: Palette, title: str, body: str,
             attr = curses.A_REVERSE if i == sel else 0
             safe_addstr(win, base + i, 3, f"> {opt}"[:width - 4], attr)
         win.refresh()
-        k = win.getch()
+        k = read_key(win)
         if k in (curses.KEY_UP, ord("k")):
             sel = (sel - 1) % len(options)
         elif k in (curses.KEY_DOWN, ord("j")):
@@ -534,7 +586,7 @@ def popup_toggle_list(scr, pal: Palette, title: str,
                     "[Space] toggle  [Enter] offer  [Esc] cancel",
                     curses.A_DIM)
         win.refresh()
-        k = win.getch()
+        k = read_key(win)
         if k == 27:
             return None
         if k in (curses.KEY_UP, ord("k")):
@@ -592,7 +644,7 @@ def show_ledger(scr, g: Game, pal: Palette):
     safe_addstr(win, win.getmaxyx()[0] - 1, 2, "[any key to close]",
                 curses.A_DIM)
     win.refresh()
-    win.getch()
+    read_key(win)
 
 
 def show_log(scr, g: Game, pal: Palette):
@@ -611,7 +663,7 @@ def show_log(scr, g: Game, pal: Palette):
         safe_addstr(win, h - 3, 2, "[up/down scroll, any other key closes]",
                     curses.A_DIM)
         win.refresh()
-        k = win.getch()
+        k = read_key(win)
         if k in (curses.KEY_UP, ord("k")):
             off = max(0, off - 1)
         elif k in (curses.KEY_DOWN, ord("j")):

@@ -500,6 +500,7 @@ def advance_month(g: Game, ai_module=None):
         ai_module.run_all(g)
     for w in g.wars.values():
         update_warscore(g, w)
+    _missions_phase(g)
     _events_phase(g)
     _check_end(g)
 
@@ -793,6 +794,95 @@ def apply_event_choice(g: Game, tag: str, ev, choice: int):
         g.provinces[n.capital].dev += fx["dev_capital"]
     if n.is_player:
         g.say("event", f"{ev[1]}: {label}")
+
+
+# ---------------------------------------------------------------- missions
+
+def _missions_phase(g: Game):
+    if not g.player or g.player not in g.nations:
+        return
+    n = g.nations[g.player]
+    if not n.alive:
+        return
+    tag = g.player
+    for m in list(g.missions):
+        if _mission_done(g, tag, m):
+            g.missions.remove(m)
+            n.gold += m.get("gold", 0)
+            n.prestige += m.get("prestige", 0)
+            g.say("event", f"Mission complete: {m['desc']} "
+                           f"(+{m.get('gold', 0)}g, "
+                           f"+{m.get('prestige', 0)} prestige)")
+            g.pending_events.append({"mission": m})
+    while len(g.missions) < 3:
+        m = _gen_mission(g, tag)
+        if m is None:
+            break
+        g.missions.append(m)
+
+
+def _mission_done(g: Game, tag: str, m: dict) -> bool:
+    kind = m["kind"]
+    if kind == "conquer":
+        return g.provinces[m["pid"]].owner == tag
+    if kind == "develop":
+        return g.total_dev(tag) >= m["amount"]
+    if kind == "build":
+        return sum(len(p.buildings)
+                   for p in g.provinces_of(tag)) >= m["amount"]
+    if kind == "ally":
+        return bool(g.nations[tag].allies)
+    if kind == "army":
+        regs = sum(a.regiments for a in g.armies_of(tag))
+        return regs >= g.force_limit(tag) > 0
+    if kind == "stability":
+        return g.nations[tag].stability >= m["amount"]
+    return False
+
+
+def _gen_mission(g: Game, tag: str) -> dict | None:
+    active = {m["kind"] for m in g.missions}
+    n = g.nations[tag]
+    cands = []
+    if "conquer" not in active:
+        border = [p for p in g.provinces.values()
+                  if p.owner != tag and g.nations[p.owner].alive
+                  and p.owner not in n.allies
+                  and any(g.provinces[nb].owner == tag
+                          for nb in p.neighbors)]
+        if border:
+            p = max(border, key=lambda p: p.dev)
+            cands.append({"kind": "conquer", "pid": p.pid,
+                          "desc": f"Conquer {p.name}",
+                          "gold": 50, "prestige": 12})
+    if "develop" not in active:
+        goal = g.total_dev(tag) + 10
+        cands.append({"kind": "develop", "amount": goal,
+                      "desc": f"Reach {goal} total development",
+                      "gold": 60, "prestige": 5})
+    if "build" not in active:
+        goal = sum(len(p.buildings) for p in g.provinces_of(tag)) + 2
+        cands.append({"kind": "build", "amount": goal,
+                      "desc": f"Construct {goal} total buildings",
+                      "gold": 50, "prestige": 5})
+    if "ally" not in active and not n.allies:
+        cands.append({"kind": "ally", "desc": "Forge an alliance",
+                      "gold": 25, "prestige": 5})
+    if "army" not in active:
+        cands.append({"kind": "army",
+                      "desc": "Field an army at your force limit",
+                      "gold": 30, "prestige": 5})
+    if "stability" not in active and n.stability < 2:
+        cands.append({"kind": "stability", "amount": 2,
+                      "desc": "Achieve +2 stability",
+                      "gold": 40, "prestige": 5})
+    if not cands:
+        return None
+    m = g.rng.choice(cands)
+    if m["kind"] == "conquer":
+        n.claims.add(m["pid"])
+        m["desc"] += " (claim granted)"
+    return m
 
 
 def _check_end(g: Game):

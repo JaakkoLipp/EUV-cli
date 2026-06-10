@@ -143,6 +143,7 @@ class Game:
         self.height = 0
         self.log: list[tuple[str, str]] = []   # (category, message)
         self.pending_events: list[dict] = []   # popups queued for the player
+        self.missions: list[dict] = []         # player objectives
         self._next_army = 1
         self._next_war = 1
         self.game_over: str | None = None      # message when player eliminated

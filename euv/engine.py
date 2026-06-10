@@ -210,12 +210,16 @@ def offer_alliance(g: Game, tag: str, other: str):
         return False, "Already allied."
     if g.at_war_with(tag, other):
         return False, "You are at war with them."
+    if o.is_player:
+        # the player decides via popup
+        if not any("alliance" in e and e.get("alliance") == tag
+                   for e in g.pending_events):
+            g.pending_events.append({"alliance": tag})
+        return False, "Offer sent to their court..."
     # AI acceptance: opinion + relative strength considerations
     accept = (o.opinion_of(tag) >= 25
               and o.ae.get(tag, 0) < 30
               and not o.in_coalition_against == tag)
-    if g.nations[other].is_player:
-        accept = True   # player decides via popup; handled by UI
     if not accept:
         return False, f"{o.name} declines (opinion {o.opinion_of(tag):.0f})."
     n.allies.add(other)
@@ -251,21 +255,31 @@ def declare_war(g: Game, tag: str, target: str,
                           n.stability - data.WAR_STAB_HIT_NO_CB)
     attackers = [tag]
     defenders = [target]
+    player_cta: str | None = None        # side the player may join via popup
     if coalition:
         attackers += [c for c in coalition if c != tag]
     else:
         for ally in sorted(n.allies):
             a = g.nations[ally]
             if a.alive and not g.at_war_with(ally, target) \
-                    and not g.truce_between(ally, target) \
-                    and (a.is_player or a.opinion_of(tag) >= 0):
-                attackers.append(ally)
+                    and not g.truce_between(ally, target):
+                if a.is_player:
+                    player_cta = "att"
+                elif a.opinion_of(tag) >= 0:
+                    attackers.append(ally)
     for ally in sorted(t.allies):
         a = g.nations[ally]
         if a.alive and ally not in attackers \
                 and not any(g.at_war_with(ally, x) for x in attackers):
-            defenders.append(ally)
+            if a.is_player:
+                player_cta = "def"
+            else:
+                defenders.append(ally)
     w = g.new_war(attackers, defenders, claim)
+    if player_cta:
+        g.pending_events.append(
+            {"cta": {"wid": w.wid, "side": player_cta,
+                     "caller": tag if player_cta == "att" else target}})
     if coalition:
         w.name = f"Coalition War against {t.name}"
     for x in attackers:
@@ -756,7 +770,7 @@ def _events_phase(g: Game):
             continue
         ev = g.rng.choices(d.EVENTS, weights=[e[3] for e in d.EVENTS])[0]
         if n.is_player:
-            g.pending_events.append({"event": ev, "tag": tag})
+            g.pending_events.append({"event": ev[0], "tag": tag})
         else:
             choice = g.rng.randrange(len(ev[4]))
             apply_event_choice(g, tag, ev, choice)

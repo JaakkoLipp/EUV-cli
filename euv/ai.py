@@ -166,13 +166,16 @@ def _diplomacy(g: Game, tag: str):
 def _military(g: Game, tag: str):
     enemies = g.enemies_of(tag)
     if not enemies:
-        # peacetime: drift the main stack home
-        for a in g.armies_of(tag):
-            if a.move_target is None and \
-                    g.provinces[a.location].owner != tag:
+        # peacetime: drift the main stack home, then spread for supply
+        for a in list(g.armies_of(tag)):
+            if a.move_target is not None:
+                continue
+            if g.provinces[a.location].owner != tag:
                 home = g.nations[tag].capital
                 if engine.find_path(g, tag, a.location, home):
                     a.move_target = home
+                continue
+            _spread_for_supply(g, tag, a)
         return
 
     my_armies = g.armies_of(tag)
@@ -220,10 +223,53 @@ def _military(g: Game, tag: str):
             d = _dist(g, a.location, p.pid)
             bonus = -6 if any(p.pid == w.cb_target
                               for w in g.wars_of(tag)) else 0
+            # small tiebreak: prefer siege camps the land can feed
+            if a.regiments > engine.supply_limit(g, tag, p.pid):
+                bonus += 2.0
             return d + p.fort_level * 1.5 + bonus
         best = min(targets, key=value)
         if best.pid != a.location:
             engine.move_army(g, a.aid, best.pid)
+
+
+def _spread_for_supply(g: Game, tag: str, a: Army):
+    """Peacetime: keep armies within supply so manpower does not bleed.
+
+    Move the whole army to the own province with the most spare supply;
+    if it fits nowhere whole, split and send half there. A one-province
+    realm with no room anywhere sheds the excess regiments instead.
+    """
+    if engine.attrition_fraction(g, a) <= 0:
+        return
+    rooms = []
+    for p in g.provinces_of(tag):
+        if p.pid == a.location or p.occupier:
+            continue
+        here = sum(b.regiments for b in g.armies.values()
+                   if b.owner == tag and b.location == p.pid)
+        room = engine.supply_limit(g, tag, p.pid) - here
+        if room > 0 and engine.find_path(g, tag, a.location, p.pid):
+            rooms.append((room, -_dist(g, a.location, p.pid), p.pid))
+    if rooms:
+        room, _, pid = max(rooms)
+        if a.regiments <= room:
+            engine.move_army(g, a.aid, pid)
+        else:
+            ok, _ = engine.split_army(g, a.aid)
+            if ok:                       # newest army = the split half
+                b = g.armies.get(g._next_army - 1)
+                if b is not None and b.owner == tag:
+                    engine.move_army(g, b.aid, pid)
+        return
+    # nowhere to go: disband down to the local limit (50% men refunded)
+    limit = engine.supply_limit(g, tag, a.location)
+    shed = min(a.regiments - 1, a.regiments - limit)
+    if shed > 0:
+        men_shed = a.men * shed // a.regiments
+        a.regiments -= shed
+        a.men -= men_shed
+        n = g.nations[tag]
+        n.manpower = min(g.manpower_max(tag), n.manpower + men_shed * 0.5)
 
 
 def _local_power(g: Game, a: Army) -> float:

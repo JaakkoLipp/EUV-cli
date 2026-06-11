@@ -1,6 +1,7 @@
 """Game engine: player/AI actions, monthly tick, combat, sieges, peace."""
 from __future__ import annotations
 
+import math
 from collections import deque
 
 from . import data
@@ -50,6 +51,36 @@ def morale_max(g: Game, tag: str) -> float:
     n = g.nations[tag]
     return max(1.0, data.MORALE_BASE * (1 - 0.03 * n.war_exhaustion)
                + 0.1 * max(0, n.stability))
+
+
+def supply_limit(g: Game, tag: str, pid: int) -> int:
+    """Regiments province pid can supply for armies of nation tag."""
+    p = g.provinces[pid]
+    # tiny epsilon so float fuzz (e.g. 5 * 0.6) never inflates the ceil
+    limit = data.SUPPLY_BASE + math.ceil(p.dev * data.SUPPLY_PER_DEV - 1e-9)
+    limit += data.SUPPLY_TERRAIN.get(p.terrain, 0)
+    if p.owner == tag or p.owner in g.nations[tag].allies:
+        limit += data.SUPPLY_FRIENDLY_BONUS
+    return max(1, limit)
+
+
+def attrition_fraction(g: Game, army: Army) -> float:
+    """Monthly fraction of men the army loses where it stands (0 if fed).
+
+    Stacking rule: all of one nation's regiments in a province are summed
+    against the supply limit, so splitting a doomstack into several armies
+    on the same spot does not dodge attrition - spreading out does.
+    """
+    tag, pid = army.owner, army.location
+    limit = supply_limit(g, tag, pid)
+    regs = sum(a.regiments for a in g.armies.values()
+               if a.owner == tag and a.location == pid)
+    if regs <= limit:
+        return 0.0
+    frac = data.ATTRITION_PER_EXCESS * (regs / limit - 1)
+    if g.at_war_with(tag, g.provinces[pid].owner):
+        frac += data.ATTRITION_HOSTILE
+    return min(data.ATTRITION_MAX, frac)
 
 
 def army_upkeep(g: Game, tag: str) -> float:
@@ -549,6 +580,7 @@ def advance_month(g: Game, ai_module=None):
     _battle_phase(g)
     _siege_phase(g)
     _economy_phase(g)
+    _supply_attrition(g)
     _attrition_and_recovery(g)
     _diplomacy_phase(g)
     for w in g.wars.values():
@@ -828,6 +860,27 @@ def _economy_phase(g: Game):
                           f"desert and the realm is in chaos.")
 
 
+def _supply_attrition(g: Game):
+    """Armies stacked beyond the local supply limit starve (monthly).
+
+    Evaluated per (province, owner): a nation's combined regiments in a
+    province are checked against the supply limit, and each of its armies
+    there loses the same fraction of men. Lost men are gone for good -
+    they are NOT refunded to the manpower pool. Morale is untouched.
+    Runs before reinforcement, so a stack must draw fresh manpower every
+    month merely to stand still.
+    """
+    by_key: dict[tuple[int, str], list[Army]] = {}
+    for a in g.armies.values():
+        by_key.setdefault((a.location, a.owner), []).append(a)
+    for (pid, tag), armies in sorted(by_key.items()):
+        frac = attrition_fraction(g, armies[0])
+        if frac <= 0:
+            continue
+        for a in armies:
+            a.men = max(0, a.men - max(1, int(a.men * frac)))
+
+
 def _attrition_and_recovery(g: Game):
     for tag, n in g.nations.items():
         if not n.alive:
@@ -870,7 +923,7 @@ def _attrition_and_recovery(g: Game):
     for a in g.armies.values():
         n = g.nations[a.owner]
         full = a.regiments * data.RECRUIT_MANPOWER
-        if a.men < full and n.manpower > 0:
+        if a.reinforce and a.men < full and n.manpower > 0:
             add = min(full - a.men, int(full * 0.08) + 20, int(n.manpower))
             a.men += add
             n.manpower -= add

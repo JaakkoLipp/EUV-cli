@@ -433,7 +433,14 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
             put(f" {a.general_name} (skill {a.general})", pal.ui(5))
         if a.move_target is not None:
             put(f" Moving to {g.provinces[a.move_target].name}", pal.ui(3))
-        put(" [m]ove [x]split [X]disband [G]eneral", curses.A_DIM)
+        put(f" Reinforce: {'on' if a.reinforce else 'OFF'}   Supply here: "
+            f"{engine.supply_limit(g, a.owner, a.location)}")
+        att = engine.attrition_fraction(g, a)
+        if att > 0:
+            put(f" Taking attrition! (-{att * 100:.1f}%/month)",
+                pal.ui(2) | curses.A_BOLD)
+        put(" [m]ove [x]split [X]disband", curses.A_DIM)
+        put(" [G]eneral [i]reinforce on/off", curses.A_DIM)
         put("-" * iw, curses.A_DIM)
 
     # --- selected province
@@ -446,6 +453,7 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
             put("  * Capital *", pal.ui(3))
         put(f" Dev {p.dev}   Fort {p.fort_level}   "
             f"Tax {p.tax_income():.2f}/m")
+        put(f" Supply limit: {engine.supply_limit(g, g.player, p.pid)}")
         if p.buildings:
             put(" Buildings: " + ", ".join(
                 data.BUILDINGS[b][0] for b in p.buildings))
@@ -785,9 +793,14 @@ ECONOMY  [d] develop province (+1 dev)   [b] build building
 MILITARY  [Tab] cycle armies  [m] move (pick target, Enter)
       [r] recruit one regiment  [R] recruit up to force limit
       [x] split army  [X] disband army  [G] hire a general
+      [i] toggle reinforcement for the selected army
       Generals add their skill to every battle die roll.
       Armies siege enemy provinces automatically when parked there.
       Battles favor numbers, morale and defensive terrain.
+      SUPPLY: a province feeds 3 + dev*0.6 regiments (less in
+      mountains/desert/marsh, +2 on own or allied soil). All your
+      regiments in one province count together; stacks above the
+      limit lose men every month - spread out or starve.
 
 DIPLOMACY  [c] fabricate claim on a border province (6 months)
       [D] diplomacy menu: improve relations, alliances, declare

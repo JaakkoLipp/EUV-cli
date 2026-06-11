@@ -55,7 +55,12 @@ but the real goal is survival and dominance on your own terms.
   stacks, hire generals, and let armies siege enemy provinces (or retake
   your own). Battles weigh numbers, morale, generals, dice and defensive
   terrain. Manpower is a slow-recovering pool; war exhaustion erodes
-  morale the longer you fight. The game autosaves every January.
+  morale the longer you fight. Provinces have a **supply limit**
+  (3 + dev×0.6 regiments, less in mountains/desert/marsh, +2 on own or
+  allied soil): a nation's regiments stacked beyond it take monthly
+  attrition, so doomstacks bleed — spread out. Toggle reinforcement per
+  army with `i` to stop a wounded stack draining your manpower. The game
+  autosaves every January.
 - **Diplomacy** — opinions, alliances, truces and calls to arms.
   Fabricate claims to get cheap casus belli. Warscore from occupations
   and battles buys provinces and gold at the peace table.
@@ -78,6 +83,7 @@ but the real goal is survival and dominance on your own terms.
 | `m` | Move selected army (pick destination, `Enter`) |
 | `x` / `X` | Split / disband army |
 | `G` | Hire a general for the selected army |
+| `i` | Toggle reinforcement for the selected army |
 | `r` / `R` | Recruit one regiment / up to force limit |
 | `d` / `b` | Develop province / build building |
 | `c` | Fabricate claim on a border province |

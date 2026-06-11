@@ -100,7 +100,7 @@ CORE_RECONQUEST_AE = 0.5   # AE multiplier when retaking your core
 
 # vassals
 VASSAL_TRIBUTE_FRAC = 0.25     # share of positive net paid to overlord
-VASSALIZE_DEV_MULT = 1.2       # warscore cost = loser total dev * this
+VASSALIZE_DEV_MULT = 0.6       # warscore cost = loser total dev * this
 VASSAL_AE_MULT = 0.5           # AE multiplier for vassalize / diplo-annex
 VASSAL_STRENGTH_SHARE = 0.6    # vassal strength counted for the overlord
 INDEPENDENCE_STRENGTH = 0.7    # vassal/overlord strength ratio to rebel

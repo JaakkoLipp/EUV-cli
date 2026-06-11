@@ -650,12 +650,12 @@ def refuse_peace(g: Game, w: War, offer: dict) -> bool:
 
 
 def execute_peace(g: Game, w: War, winner: str, pids: list[int],
-                  gold: float):
+                  gold: float, vassalize: bool = False):
     win_side = w.attackers if w.side_of(winner) == "att" else w.defenders
     lose_side = w.defenders if w.side_of(winner) == "att" else w.attackers
     loser_leader = lose_side[0]
     # prestige stakes between rivals (judged before any annexation)
-    rival_stake = (pids or gold > 0) and \
+    rival_stake = (pids or gold > 0 or vassalize) and \
         (loser_leader in g.nations[winner].rivals
          or winner in g.nations[loser_leader].rivals)
     terms = []
@@ -664,17 +664,24 @@ def execute_peace(g: Game, w: War, winner: str, pids: list[int],
         old = p.owner
         _transfer_province(g, pid, winner)
         terms.append(p.name)
-        # aggressive expansion among everyone who isn't the winner
+        # aggressive expansion among everyone who isn't the winner;
+        # retaking your own core scares the neighbours far less
+        core_mult = (data.CORE_RECONQUEST_AE if winner in p.cores
+                     else 1.0)
         for tag, n in g.nations.items():
             if tag == winner or not n.alive or tag == data.REBEL_TAG:
                 continue
             dist = 1.0 if any(g.provinces[nb].owner == tag
                               for nb in p.neighbors) else 0.5
             n.ae[winner] = n.ae.get(winner, 0) + \
-                data.AE_PER_DEV_TAKEN * p.dev * dist
-            n.opinions[winner] = n.opinion_of(winner) - p.dev * dist
+                data.AE_PER_DEV_TAKEN * p.dev * dist * core_mult
+            n.opinions[winner] = n.opinion_of(winner) \
+                - p.dev * dist * core_mult
         if old in g.nations:
             g.nations[winner].prestige += p.dev * 0.5
+    if vassalize:
+        _make_vassal(g, loser_leader, winner)
+        terms.append(f"vassalization of {g.nations[loser_leader].name}")
     if gold > 0:
         lo = g.nations[loser_leader]
         pay = min(gold, max(0.0, lo.gold))
@@ -686,6 +693,23 @@ def execute_peace(g: Game, w: War, winner: str, pids: list[int],
         g.nations[loser_leader].prestige -= data.RIVAL_PRESTIGE_STAKE
         g.say("diplo", f"{g.nations[winner].name} humbles its rival "
                        f"{g.nations[loser_leader].name}!")
+    # independence wars: any non-losing peace frees the rebels
+    if w.independence:
+        rebel_won = (w.side_of(winner) == "att"
+                     or (not pids and gold <= 0 and not vassalize
+                         and w.score >= 0))
+        if rebel_won:
+            for t in list(w.attackers):
+                n = g.nations[t]
+                if n.alive and n.overlord and n.overlord in w.defenders:
+                    lord = g.nations[n.overlord]
+                    if lord.annexing and lord.annexing[0] == t:
+                        lord.annexing = None
+                    n.overlord = None
+                    n.vassal_since = 0
+                    g.say("diplo", f"{n.name} breaks free of "
+                                   f"{lord.name}!")
+            terms.append("independence")
     # lift occupations between the two sides, set truces
     for tag in win_side + lose_side:
         for p in g.provinces_of(tag):
@@ -713,10 +737,86 @@ def execute_peace(g: Game, w: War, winner: str, pids: list[int],
                  f"The {w.name} ends in a white peace.")
 
 
-def _transfer_province(g: Game, pid: int, to: str):
+def _spread_ae(g: Game, gainer: str, other: str, dev: float):
+    """AE/opinion hit among third parties when `gainer` absorbs `dev`
+    worth of `other` diplomatically (vassalization or integration)."""
+    near = {g.provinces[nb].owner for p in g.provinces_of(other)
+            for nb in p.neighbors}
+    for tag, n in g.nations.items():
+        if tag in (gainer, other) or not n.alive or tag == data.REBEL_TAG:
+            continue
+        dist = 1.0 if tag in near else 0.5
+        amt = data.AE_PER_DEV_TAKEN * dev * dist * data.VASSAL_AE_MULT
+        n.ae[gainer] = n.ae.get(gainer, 0) + amt
+        n.opinions[gainer] = n.opinion_of(gainer) \
+            - dev * dist * data.VASSAL_AE_MULT
+
+
+def _make_vassal(g: Game, tag: str, overlord: str):
+    """`tag` submits to `overlord`: a peace-imposed vassalization."""
+    n, lord = g.nations[tag], g.nations[overlord]
+    n.overlord = overlord
+    n.vassal_since = g.abs_month
+    # no chains of subjects: the new vassal's own vassals go free
+    for v in g.vassals_of(tag):
+        g.nations[v].overlord = None
+        g.nations[v].vassal_since = 0
+        g.say("diplo", f"{g.nations[v].name} slips free as its overlord "
+                       f"{n.name} is itself subjugated.")
+    # a vassal keeps no alliances or coalition seats of its own
+    for a in sorted(n.allies):
+        g.nations[a].allies.discard(tag)
+    n.allies.clear()
+    n.in_coalition_against = None
+    _spread_ae(g, overlord, tag, g.total_dev(tag))
+    g.say("war", f"*** {n.name} submits and becomes a vassal of "
+                 f"{lord.name}! ***")
+
+
+def start_annex_vassal(g: Game, tag: str, vassal: str):
+    n = g.nations[tag]
+    v = g.nations.get(vassal)
+    if v is None or not v.alive or v.overlord != tag:
+        return False, "Not your vassal."
+    if n.annexing:
+        return False, (f"Already integrating "
+                       f"{g.nations[n.annexing[0]].name}.")
+    months = g.abs_month - v.vassal_since
+    if months < data.ANNEX_MIN_VASSAL_MONTHS:
+        wait = data.ANNEX_MIN_VASSAL_MONTHS - months
+        return False, (f"Too soon: {v.name} must serve "
+                       f"{wait} more month(s) first.")
+    if v.opinion_of(tag) < 0:
+        return False, f"{v.name} resents you (opinion < 0)."
+    n.annexing = (vassal, data.ANNEX_VASSAL_MONTHS)
+    g.say("diplo", f"{n.name} begins the diplomatic annexation of "
+                   f"{v.name} ({data.ANNEX_VASSAL_MONTHS} months).")
+    return True, (f"Integration of {v.name} begun "
+                  f"({data.ANNEX_VASSAL_MONTHS} months).")
+
+
+def release_vassal(g: Game, tag: str, vassal: str):
+    n = g.nations[tag]
+    v = g.nations.get(vassal)
+    if v is None or not v.alive or v.overlord != tag:
+        return False, "Not your vassal."
+    v.overlord = None
+    v.vassal_since = 0
+    if n.annexing and n.annexing[0] == vassal:
+        n.annexing = None
+    v.opinions[tag] = v.opinion_of(tag) + 10
+    n.opinions[vassal] = n.opinion_of(vassal) + 10
+    n.prestige += 5
+    g.say("diplo", f"{n.name} releases {v.name} from vassalage.")
+    return True, f"{v.name} released (+5 prestige)."
+
+
+def _transfer_province(g: Game, pid: int, to: str,
+                       integrated: bool = False):
     p = g.provinces[pid]
     old = p.owner
     p.owner = to
+    p.owner_since = g.abs_month
     p.occupier = None
     p.siege_progress = 0.0
     p.sieging = None
@@ -725,12 +825,12 @@ def _transfer_province(g: Game, pid: int, to: str):
     if old in g.nations:
         n = g.nations[old]
         if not g.provinces_of(old):
-            _eliminate(g, old, to)
+            _eliminate(g, old, to, integrated=integrated)
         elif pid == n.capital:
             n.capital = max(g.provinces_of(old), key=lambda q: q.dev).pid
 
 
-def _eliminate(g: Game, tag: str, by: str):
+def _eliminate(g: Game, tag: str, by: str, integrated: bool = False):
     n = g.nations[tag]
     n.alive = False
     for a in list(g.armies.values()):
@@ -748,10 +848,23 @@ def _eliminate(g: Game, tag: str, by: str):
         o.truces.pop(tag, None)
         if o.in_coalition_against == tag:
             o.in_coalition_against = None
-    g.say("war", f"*** {n.name} has been annexed by {g.nations[by].name}! ***")
+        if o.annexing and o.annexing[0] == tag:
+            o.annexing = None
+        if o.overlord == tag:        # a dead overlord binds no one
+            o.overlord = None
+            o.vassal_since = 0
+    n.overlord = None
+    n.annexing = None
+    if integrated:
+        g.say("war", f"*** {n.name} has been integrated into "
+                     f"{g.nations[by].name}! ***")
+    else:
+        g.say("war", f"*** {n.name} has been annexed by "
+                     f"{g.nations[by].name}! ***")
     if n.is_player:
+        verb = "integrated" if integrated else "annexed"
         g.game_over = (f"{n.name} has fallen. "
-                       f"Your realm was annexed by {g.nations[by].name}.")
+                       f"Your realm was {verb} by {g.nations[by].name}.")
 
 
 def _send_strays_home(g: Game, tags: list[str]):
@@ -776,6 +889,7 @@ def advance_month(g: Game, ai_module=None):
     _battle_phase(g)
     _siege_phase(g)
     _economy_phase(g)
+    _subjects_phase(g)
     _supply_attrition(g)
     _attrition_and_recovery(g)
     _unrest_phase(g)
@@ -1081,6 +1195,58 @@ def _economy_phase(g: Game):
                           f"desert and the realm is in chaos.")
 
 
+def _subjects_phase(g: Game):
+    """Coring, vassal tribute and diplomatic annexation (monthly)."""
+    # provinces held long enough core to their owner; old cores fade
+    for p in g.provinces.values():
+        if g.abs_month - p.owner_since < data.CORE_MONTHS:
+            continue
+        if p.cores != {p.owner}:
+            p.cores = {p.owner}
+            if g.nations[p.owner].is_player:
+                g.say("econ", f"{p.name} is now a core province.")
+    # vassals in the black pay tribute; years of peace breed loyalty
+    for tag in sorted(g.nations):
+        n = g.nations[tag]
+        if not n.alive or not n.overlord or tag == data.REBEL_TAG:
+            continue
+        if g.at_war_with(tag, n.overlord):
+            continue            # rebels pay no tribute to their oppressor
+        _, _, net = monthly_balance(g, tag)
+        if net > 0:
+            tribute = net * data.VASSAL_TRIBUTE_FRAC
+            n.gold -= tribute
+            g.nations[n.overlord].gold += tribute
+        n.opinions[n.overlord] = min(
+            100.0, n.opinion_of(n.overlord) + 0.5)
+    # diplomatic annexation ticks down
+    for tag in sorted(g.nations):
+        n = g.nations[tag]
+        if not n.alive or not n.annexing:
+            continue
+        vtag, left = n.annexing
+        v = g.nations.get(vtag)
+        if v is None or not v.alive or v.overlord != tag:
+            n.annexing = None
+            continue
+        if left > 1:
+            n.annexing = (vtag, left - 1)
+            continue
+        n.annexing = None
+        vname = v.name
+        _spread_ae(g, tag, vtag, g.total_dev(vtag))
+        for p in list(g.provinces_of(vtag)):
+            _transfer_province(g, p.pid, tag, integrated=True)
+            p.unrest = min(p.unrest, 4.0)   # a peaceful transition
+        g.say("diplo", f"{n.name} completes the integration of {vname}.")
+        if n.is_player:
+            g.pending_events.append({"notice": {
+                "title": "Integration Complete",
+                "body": f"{vname} has been peacefully integrated into "
+                        f"your realm. Its provinces are yours, though "
+                        f"they will take time to core."}})
+
+
 def _supply_attrition(g: Game):
     """Armies stacked beyond the local supply limit starve (monthly).
 
@@ -1342,6 +1508,7 @@ def _gen_mission(g: Game, tag: str) -> dict | None:
         border = [p for p in g.provinces.values()
                   if p.owner != tag and g.nations[p.owner].alive
                   and p.owner not in n.allies
+                  and g.nations[p.owner].overlord != tag
                   and any(g.provinces[nb].owner == tag
                           for nb in p.neighbors)]
         if border:

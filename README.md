@@ -72,6 +72,15 @@ but the real goal is survival and dominance on your own terms.
 - **War goals** — in claim wars, whichever side controls the claimed
   province gains a slow monthly warscore tick (up to +/-20), so wars
   over a goal resolve decisively instead of stalling forever.
+- **Vassals** — win a war hard enough and demand vassalization instead
+  of land: the loser keeps its provinces but pays tribute, follows you
+  into war, and may neither ally nor scheme. Attacking someone's vassal
+  means war with the overlord. After ten loyal years a vassal can be
+  diplomatically annexed (24 months); strong vassals declare wars of
+  independence, dragging their fellow subjects along.
+- **Cores & reconquest** — conquered provinces stay non-core for ten
+  years (-25% tax) while the old owner keeps a core there: a permanent
+  casus belli, half-price at the peace table and far less AE to retake.
 - **Aggressive expansion** — every conquest scares the neighbours.
   Push too fast and a hostile coalition will form and strike.
 - **Unrest & rebels** — negative stability, war exhaustion and fresh

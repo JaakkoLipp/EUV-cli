@@ -92,16 +92,33 @@ def _diplomacy(g: Game, tag: str):
     n = g.nations[tag]
     rng = g.rng
     at_war = bool(g.wars_of(tag))
+    if n.overlord:
+        # vassals neither ally nor declare wars; they may rebel
+        ov = n.overlord
+        if (not at_war and not g.truce_between(tag, ov)
+                and g.raw_strength(tag) > data.INDEPENDENCE_STRENGTH
+                * g.raw_strength(ov)
+                and rng.random() < data.INDEPENDENCE_CHANCE):
+            engine.declare_war(g, tag, ov, independence=True)
+        return
     neighbours = {g.provinces[nb].owner
                   for p in g.provinces_of(tag) for nb in p.neighbors
                   if g.provinces[nb].owner != tag}
     neighbours = {t for t in neighbours if g.nations[t].alive}
+
+    # an overlord slowly digests a loyal long-time vassal
+    if n.annexing is None and rng.random() < 0.05:
+        for v in g.vassals_of(tag):
+            ok, _ = engine.start_annex_vassal(g, tag, v)
+            if ok:
+                break
 
     # court strong neighbours: improve relations, then ally
     if not at_war and len(n.allies) < 2 and rng.random() < 0.15:
         cands = [t for t in neighbours
                  if t not in n.allies and not g.truce_between(tag, t)
                  and not g.nations[t].is_player
+                 and not g.nations[t].overlord
                  and t not in n.rivals and tag not in g.nations[t].rivals
                  and g.nations[t].ae.get(tag, 0) < 30]
         if cands:
@@ -119,6 +136,8 @@ def _diplomacy(g: Game, tag: str):
         for t in neighbours:
             if g.truce_between(tag, t) or t in n.allies:
                 continue
+            if g.nations[t].overlord == tag:
+                continue            # never scheme against your own vassal
             if g.nation_strength(tag) > g.nation_strength(t) * 1.1 \
                     or t in n.rivals:
                 border = [p.pid for p in g.provinces_of(t)
@@ -147,8 +166,16 @@ def _diplomacy(g: Game, tag: str):
             o = g.nations[t]
             if g.truce_between(tag, t) or t in n.allies or not o.alive:
                 continue
-            their = g.nation_strength(t) + sum(
-                g.nation_strength(a) * 0.7 for a in o.allies
+            if o.overlord == tag:
+                continue            # your own vassal is not a target
+            # a war on a vassal redirects to the overlord: weigh them
+            real = g.nations[o.overlord] if o.overlord else o
+            if real.tag != t and (g.truce_between(tag, real.tag)
+                                  or real.tag in n.allies
+                                  or g.at_war_with(tag, real.tag)):
+                continue
+            their = g.nation_strength(real.tag) + sum(
+                g.nation_strength(a) * 0.7 for a in real.allies
                 if not g.wars_of(a))
             ratio = my / max(their, 1)
             has_claim = any(g.provinces[c].owner == t for c in n.claims)
@@ -345,6 +372,17 @@ def _consider_peace(g: Game, tag: str):
             engine.offer_peace(g, w, tag, give, max(0.0, -my) * 1.2,
                                beneficiary=enemy_leader)
             continue
+        # winning hard against a sizeable foe: demand vassalization
+        enemy = g.nations[enemy_leader]
+        if (my > 30 and months > 6 and not n.overlord
+                and not enemy.overlord
+                and len(g.provinces_of(enemy_leader)) >= 3
+                and min(my, my - 8 + w.refusals * 6)
+                >= engine.vassalize_cost(g, enemy_leader)
+                and g.rng.random() < 0.5):
+            ok, _ = engine.offer_peace(g, w, tag, [], 0, vassalize=True)
+            if ok or enemy.is_player or w.wid not in g.wars:
+                continue   # done, or the player is mulling the demand
         # winning enough: cash in (each refusal hardens the demands)
         if my > 30 and months > 12:
             budget = min(my, my - 8 + w.refusals * 6)
@@ -394,6 +432,7 @@ def _coalitions(g: Game):
             continue
         members = [t for t, n in g.nations.items()
                    if n.alive and t != target_tag and not n.is_player
+                   and not n.overlord
                    and n.ae.get(target_tag, 0) > data.COALITION_AE_THRESHOLD
                    and n.opinion_of(target_tag) < 0
                    and not g.at_war_with(t, target_tag)

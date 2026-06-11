@@ -31,6 +31,7 @@ def save(g: Game, path: str = SAVE_PATH):
             "occupier": p.occupier, "siege_progress": p.siege_progress,
             "sieging": p.sieging, "unrest": p.unrest,
             "reb_months": p.reb_months,
+            "cores": sorted(p.cores), "owner_since": p.owner_since,
         } for p in g.provinces.values()],
         "nations": [{
             "tag": n.tag, "name": n.name, "culture": n.culture,
@@ -44,6 +45,8 @@ def save(g: Game, path: str = SAVE_PATH):
             "in_coalition_against": n.in_coalition_against,
             "last_war_month": n.last_war_month,
             "rivals": sorted(n.rivals),
+            "overlord": n.overlord, "vassal_since": n.vassal_since,
+            "annexing": n.annexing,
         } for n in g.nations.values()],
         "armies": [{
             "aid": a.aid, "owner": a.owner, "location": a.location,
@@ -59,6 +62,7 @@ def save(g: Game, path: str = SAVE_PATH):
             "dom_months": w.dom_months, "refusals": w.refusals,
             "no_offers_until": w.no_offers_until,
             "goal_score": w.goal_score,
+            "independence": w.independence,
         } for w in g.wars.values()],
     }
     tmp = path + ".tmp"
@@ -87,7 +91,9 @@ def load(path: str = SAVE_PATH) -> Game:
                      [tuple(c) for c in d["cells"]], tuple(d["center"]),
                      set(d["neighbors"]), d["coastal"], d["occupier"],
                      d["siege_progress"], d["sieging"], d["unrest"],
-                     d.get("reb_months", 0))
+                     d.get("reb_months", 0),
+                     set(d.get("cores", [d["owner"]])),
+                     d.get("owner_since", 0))
         g.provinces[p.pid] = p
     for d in s["nations"]:
         n = Nation(d["tag"], d["name"], d["culture"], d["color"],
@@ -99,7 +105,9 @@ def load(path: str = SAVE_PATH) -> Game:
                    tuple(d["fabricating"]) if d["fabricating"] else None,
                    d["in_coalition_against"],
                    d.get("last_war_month", (s["year"] - 5) * 12),
-                   set(d.get("rivals", [])))
+                   set(d.get("rivals", [])),
+                   d.get("overlord"), d.get("vassal_since", 0),
+                   tuple(d["annexing"]) if d.get("annexing") else None)
         g.nations[n.tag] = n
     # saves from before the rebel system lack the REB nation
     from . import worldgen
@@ -114,7 +122,8 @@ def load(path: str = SAVE_PATH) -> Game:
         w = War(d["wid"], d["attackers"], d["defenders"], d["cb_target"],
                 tuple(d["start"]), d["score"], d["battles_score"], d["name"],
                 d.get("dom_months", 0), d.get("refusals", 0),
-                d.get("no_offers_until", 0), d.get("goal_score", 0.0))
+                d.get("no_offers_until", 0), d.get("goal_score", 0.0),
+                d.get("independence", False))
         g.wars[w.wid] = w
     return g
 

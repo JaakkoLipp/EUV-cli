@@ -14,6 +14,8 @@ echo "== rebels & unrest mechanics =="
 python3 tests/test_rebels.py | tail -1
 echo "== rivalries, war goals, stability scaling =="
 python3 tests/test_rivals.py | tail -1
+echo "== vassals, cores & reconquest =="
+python3 tests/test_vassals.py | tail -1
 echo "== TUI: scripted session =="
 python3 tests/tui_driver.py | tail -1
 echo "== TUI: war & peace flow =="

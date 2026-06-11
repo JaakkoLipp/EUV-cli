@@ -175,6 +175,8 @@ def rel_to_player(g: Game, tag: str) -> int:
     n = g.nations[me]
     if tag in n.allies:
         return 1
+    if g.nations[tag].overlord == me or n.overlord == tag:
+        return 1     # own vassals and your overlord fight beside you
     if g.at_war_with(me, tag):
         return 2
     if g.truce_between(me, tag):
@@ -238,7 +240,11 @@ def draw_map(win, g: Game, pal: Palette, ui):
         cx, cy = p.center
         if ui.mapmode == 1:
             label = p.owner
-            base = pal.nation_bg(g.nations[p.owner].color)
+            own = g.nations[p.owner]
+            # vassal tags carry the overlord's colors; cells stay theirs
+            col = (g.nations[own.overlord].color if own.overlord
+                   else own.color)
+            base = pal.nation_bg(col)
         elif ui.mapmode == 3:
             label = f"{p.dev:2d}"
             base = pal.dev_bg(p.dev)
@@ -409,6 +415,15 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
     if me.allies:
         put("Allies: " + ", ".join(sorted(
             g.nations[t].name for t in me.allies)), pal.ui(4))
+    vassals = g.vassals_of(g.player)
+    if vassals:
+        put("Vassals: " + ", ".join(
+            g.nations[t].name for t in vassals), pal.ui(4))
+    if me.overlord:
+        put(f"Vassal of {g.nations[me.overlord].name}", pal.ui(3))
+    if me.annexing:
+        vt, left = me.annexing
+        put(f"Integrating {g.nations[vt].name} ({left}m)", pal.ui(6))
     if me.rivals:
         put("Rivals: " + ", ".join(sorted(
             g.nations[t].name for t in me.rivals)), pal.ui(2))
@@ -470,6 +485,12 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
         else:
             put(f" Unrest {p.unrest:.1f}",
                 pal.ui(3) if p.unrest >= 3 else curses.A_DIM)
+        if p.cores != {p.owner}:
+            names = ", ".join(g.nations[t].name for t in sorted(p.cores)
+                              if t in g.nations) or "none"
+            warn = "" if p.owner in p.cores else "  (non-core tax!)"
+            put(f" Core of: {names}{warn}",
+                pal.ui(3) if p.owner not in p.cores else curses.A_DIM)
         if p.buildings:
             put(" Buildings: " + ", ".join(
                 data.BUILDINGS[b][0] for b in p.buildings))
@@ -503,7 +524,17 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
                 f"AE: {o.ae.get(g.player, 0):.0f}")
             put(f" Dev {g.total_dev(o.tag)}  "
                 f"Troops ~{sum(a.regiments for a in g.armies_of(o.tag))}r")
+            if o.overlord:
+                put(f" Vassal of {g.nations[o.overlord].name}", pal.ui(4))
+            ovas = g.vassals_of(o.tag)
+            if ovas:
+                put(" Vassals: " + ", ".join(
+                    g.nations[t].name for t in ovas), pal.ui(4))
             rel = []
+            if o.overlord == g.player:
+                rel.append("YOUR VASSAL")
+            if me.overlord == o.tag:
+                rel.append("YOUR OVERLORD")
             if o.tag in me.allies:
                 rel.append("ALLY")
             if o.tag in me.rivals or g.player in o.rivals:
@@ -736,6 +767,10 @@ def show_ledger(scr, g: Game, pal: Palette):
         rel = ""
         if t == g.player:
             rel = "YOU"
+        elif n.overlord == g.player:
+            rel = "vassal"
+        elif g.nations[g.player].overlord == t:
+            rel = "lord"
         elif t in g.nations[g.player].allies:
             rel = "ally"
         elif g.at_war_with(g.player, t):
@@ -831,6 +866,13 @@ DIPLOMACY  [c] fabricate claim on a border province (6 months)
       opinions sour toward -40, envoys are refused, and peace
       against a rival swings prestige. Watch Aggressive Expansion
       - high AE triggers hostile coalitions.
+      VASSALS: win big and demand vassalization at the peace
+      table. Vassals pay tribute, fight your wars, and cannot
+      ally or declare wars. After 10 loyal years you may begin
+      diplomatic annexation (24 months); or release them for
+      prestige. Attacking a vassal means war with its overlord.
+      A strong vassal may declare independence - fellow vassals
+      rise with it.
 
 WAR   Warscore comes from occupations and battles won. In claim
       wars the side controlling the war-goal province also gains
@@ -841,6 +883,9 @@ WAR   Warscore comes from occupations and battles won. In claim
       doubles exhaustion and risks stability; refusing a fair
       peace offer costs stability outright. If one side holds
       total warscore for a year, the loser must capitulate.
+      CORES: conquered land is non-core (-25% tax) until held
+      10 years; old owners keep a core - a cheap reconquest CB
+      with half AE and half peace cost to take it back.
 
 UNREST  Negative stability and war exhaustion raise province
       unrest (temples lower it; conquest spikes it). At 8+ a

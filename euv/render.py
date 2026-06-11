@@ -20,6 +20,8 @@ class Palette:
     T_BG = 90        # terrain backgrounds
     DEV = 110        # development heat
     UI = 130         # ui pairs
+    MIL = 150        # military mode terrain: own/ally/enemy/truce/neutral
+    CHIP = 160       # military mode army chips: own/ally/enemy/neutral
 
     NATION_256 = [167, 68, 71, 178, 133, 208, 37, 168, 101, 107,
                   73, 131, 144, 246]
@@ -52,6 +54,12 @@ class Palette:
                 curses.init_pair(self.DEV + i, black, c)
             self.dev_levels = len(self.DEV_256)
             curses.init_pair(self.UI + 0, 250, 17)      # sea
+            for i, (fg, bg) in enumerate([(252, 22), (252, 24), (252, 52),
+                                          (250, 58), (245, 235)]):
+                curses.init_pair(self.MIL + i, fg, bg)
+            for i, (fg, bg) in enumerate([(16, 40), (16, 45), (231, 160),
+                                          (16, 250)]):
+                curses.init_pair(self.CHIP + i, fg, bg)
         else:
             for i, c in enumerate(self.NATION_8):
                 curses.init_pair(self.N_BG + i, black, c)
@@ -64,6 +72,16 @@ class Palette:
             self.dev_levels = len(self.DEV_8)
             curses.init_pair(self.UI + 0, curses.COLOR_CYAN,
                              curses.COLOR_BLUE)
+            white, red = curses.COLOR_WHITE, curses.COLOR_RED
+            green, cyan = curses.COLOR_GREEN, curses.COLOR_CYAN
+            yellow = curses.COLOR_YELLOW
+            for i, (fg, bg) in enumerate([(black, green), (black, cyan),
+                                          (white, red), (black, yellow),
+                                          (white, black)]):
+                curses.init_pair(self.MIL + i, fg, bg)
+            for i, (fg, bg) in enumerate([(black, green), (black, cyan),
+                                          (white, red), (black, white)]):
+                curses.init_pair(self.CHIP + i, fg, bg)
         # generic ui pairs
         curses.init_pair(self.UI + 1, curses.COLOR_BLACK,
                          curses.COLOR_WHITE)                   # status bar
@@ -91,6 +109,12 @@ class Palette:
 
     def sea(self):
         return curses.color_pair(self.UI + 0)
+
+    def mil(self, rel: int) -> int:
+        return curses.color_pair(self.MIL + rel)
+
+    def chip(self, rel: int) -> int:
+        return curses.color_pair(self.CHIP + min(rel, 3))
 
     def ui(self, i: int) -> int:
         return curses.color_pair(self.UI + i)
@@ -138,6 +162,23 @@ def safe_addstr(win, y, x, s, attr=0):
 
 # ------------------------------------------------------------------ the map
 
+def rel_to_player(g: Game, tag: str) -> int:
+    """0 own, 1 ally, 2 at war, 3 truce, 4 neutral (vs the player)."""
+    me = g.player
+    if not me or me not in g.nations:
+        return 4
+    if tag == me:
+        return 0
+    n = g.nations[me]
+    if tag in n.allies:
+        return 1
+    if g.at_war_with(me, tag):
+        return 2
+    if g.truce_between(me, tag):
+        return 3
+    return 4
+
+
 def cell_attr(g: Game, pal: Palette, ui, x: int, y: int):
     """(char, attr) for one map cell."""
     pid = g.grid[y][x]
@@ -154,7 +195,7 @@ def cell_attr(g: Game, pal: Palette, ui, x: int, y: int):
         attr = pal.terrain_bg(p.terrain)
     elif mode == 3:     # development
         attr = pal.dev_bg(p.dev)
-    else:               # diplomatic
+    elif mode == 4:     # diplomatic
         me = g.player
         n = g.nations[me] if me in g.nations else None
         owner = p.owner
@@ -168,21 +209,27 @@ def cell_attr(g: Game, pal: Palette, ui, x: int, y: int):
             attr = pal.ui(3) | curses.A_REVERSE
         else:
             attr = pal.ui(1)
+    else:               # military: muted relationship tints; units pop
+        attr = pal.mil(rel_to_player(g, p.owner))
+        if p.occupier and (x + y) % 2 == 0:
+            attr = pal.mil(rel_to_player(g, p.occupier))
     if ui.sel_pid == pid:
         attr |= curses.A_BOLD
     return glyph, attr
 
 
 def draw_map(win, g: Game, pal: Palette, ui):
+    from . import engine
     win.erase()
     win.box()
     title = {1: "POLITICAL", 2: "TERRAIN", 3: "DEVELOPMENT",
-             4: "DIPLOMATIC"}[ui.mapmode]
+             4: "DIPLOMATIC", 5: "MILITARY"}[ui.mapmode]
     safe_addstr(win, 0, 2, f"[ Eryndor - {title} ]", curses.A_BOLD)
     for y in range(g.height):
         for x in range(g.width):
             ch, attr = cell_attr(g, pal, ui, x, y)
             safe_addstr(win, y + 1, x + 1, ch, attr)
+    sel_army = g.armies.get(ui.sel_aid) if ui.sel_aid is not None else None
     # province tags at centers
     for p in g.provinces.values():
         cx, cy = p.center
@@ -196,10 +243,18 @@ def draw_map(win, g: Game, pal: Palette, ui):
             label = p.owner
             _, base = cell_attr(g, pal, ui, cx, cy)
         attr = base | curses.A_BOLD
+        if ui.mapmode == 5 and p.sieging:
+            # siege progress replaces the tag where it matters most
+            label = f"{min(99, int(p.siege_progress)):2d}%"
+            attr = pal.ui(7) | curses.A_BOLD
+        if (ui.mapmode == 5 and sel_army is not None
+                and sel_army.owner == g.player
+                and sel_army.move_target == p.pid):
+            attr = pal.ui(3) | curses.A_REVERSE | curses.A_BOLD
         if p.pid == ui.sel_pid:
             attr = base | curses.A_REVERSE | curses.A_BOLD
         safe_addstr(win, cy + 1, cx, label, attr)
-        if p.sieging:
+        if p.sieging and ui.mapmode != 5:
             safe_addstr(win, cy + 1, cx + len(label),
                         "!", pal.ui(7) | curses.A_BOLD)
     # armies
@@ -211,11 +266,31 @@ def draw_map(win, g: Game, pal: Palette, ui):
         cx, cy = p.center
         owners = {a.owner for a in armies}
         total = sum(a.regiments for a in armies)
-        marker = f"*{min(total, 99)}"
-        if len(owners) > 1:
+        if ui.mapmode == 5:
+            if len(owners) > 1:
+                # a battle: show the odds of the two biggest sides
+                by_owner: dict[str, int] = {}
+                for a in armies:
+                    by_owner[a.owner] = by_owner.get(a.owner, 0) \
+                        + a.regiments
+                top = sorted(by_owner.values(), reverse=True)
+                marker = f"{min(top[0], 99)}v{min(top[1], 99)}"
+                attr = pal.chip(2) | curses.A_BOLD
+            else:
+                o = next(iter(owners))
+                lead = max(armies, key=lambda a: a.men)
+                cap = engine.morale_max(g, o)
+                frac = lead.morale / cap if cap else 1.0
+                glyph = "*" if frac >= 0.66 else \
+                    ("o" if frac >= 0.33 else "x")
+                marker = f"{glyph}{min(total, 99)}"
+                attr = pal.chip(rel_to_player(g, o)) | curses.A_BOLD
+        elif len(owners) > 1:
+            marker = f"*{min(total, 99)}"
             attr = pal.ui(7) | curses.A_BOLD
         else:
             o = next(iter(owners))
+            marker = f"*{min(total, 99)}"
             attr = pal.nation_fg(g.nations[o].color)
             if o == g.player:
                 attr |= curses.A_UNDERLINE
@@ -229,8 +304,7 @@ def draw_map(win, g: Game, pal: Palette, ui):
                 break
         if spot is None:
             spot = (cx - 3, cy)
-        sel = (ui.sel_aid is not None and ui.sel_aid in g.armies
-               and g.armies[ui.sel_aid].location == pid)
+        sel = sel_army is not None and sel_army.location == pid
         if sel:
             attr |= curses.A_REVERSE
         safe_addstr(win, spot[1] + 1, spot[0] + 1, marker, attr)
@@ -452,7 +526,7 @@ def draw_log(scr, g: Game, pal: Palette, top: int, lines: int):
 def draw_keybar(scr, pal: Palette, ui, status: str = ""):
     h, w = scr.getmaxyx()
     keys = ("[Spc]turn [>]year [Tab]army [m]ove [r]ecruit [b]uild [d]ev "
-            "[c]laim [D]iplo [+]stab [o]ledger [g]log [1-4]map [?]help "
+            "[c]laim [D]iplo [+]stab [o]ledger [g]log [1-5]map [?]help "
             "[S]ave [q]uit")
     safe_addstr(scr, h - 1, 0, " " * (w - 1), pal.ui(1))
     text = status if status else keys
@@ -693,6 +767,12 @@ forge alliances, win wars, take provinces. Score = dev*2 + prestige
 
 MAP   Arrows/hjkl move cursor - Enter selects province
       1 political  2 terrain  3 development  4 diplomatic
+      5 military: terrain tinted by relation (green you, cyan
+      ally, red at-war, yellow truce, gray neutral); army chips
+      colored the same way; marker glyph shows morale (* ready,
+      o shaken, x broken); battles show odds like 9v7; sieges
+      show progress % in place of the tag; your selected army's
+      destination is highlighted.
       Tags show owners; *N markers are armies; ! means siege.
 
 TURNS Space ends the turn (1 month). > plays up to 12 months,

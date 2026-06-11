@@ -290,7 +290,7 @@ def handle_key(stdscr, g, pal, ui, k) -> bool:
         show_log(stdscr, g, pal)
     elif k in (ord("?"), curses.KEY_F1):
         show_help(stdscr, pal)
-    elif k in (ord("1"), ord("2"), ord("3"), ord("4")):
+    elif k in (ord("1"), ord("2"), ord("3"), ord("4"), ord("5")):
         ui.mapmode = k - ord("0")
     elif k == ord(" "):
         end_turn(stdscr, g, pal, ui)

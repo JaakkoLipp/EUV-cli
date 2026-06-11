@@ -6,7 +6,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from tui_driver import Driver, ENTER, ESC, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_UP
 
-KEYS = (list("hjkl mrRbdcDx+og1234?>") + ["\t"]
+KEYS = (list("hjkl mrRbdcDx+og12345?>") + ["\t"]
         + [None] * 0)
 SPECIALS = [ENTER, ESC, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT]
 

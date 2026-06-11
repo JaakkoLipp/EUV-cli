@@ -83,7 +83,7 @@ but the real goal is survival and dominance on your own terms.
 | `c` | Fabricate claim on a border province |
 | `D` | Diplomacy (relations, alliances, war, peace) |
 | `+` | Raise stability |
-| `1 2 3 4` | Map modes: political, terrain, development, diplomatic |
+| `1 2 3 4 5` | Map modes: political, terrain, development, diplomatic, military |
 | `o` / `g` | Ledger of nations / chronicle (full log) |
 | `?` | Help |
 | `S` / `L` / `q` | Save / load / quit |
@@ -92,6 +92,13 @@ Map legend: three-letter tags mark province owners, `*N` markers are army
 stacks (N regiments), `!` marks an active siege, striped provinces are
 occupied, `~` is the sea. Terrain glyphs: `.` plains, `f` forest,
 `n` hills, `^` mountains, `:` desert, `m` marsh.
+
+The **military map mode** (`5`) is built for wartime: terrain is tinted by
+your relation to the owner (green yours, cyan allied, red at-war, yellow
+truce, gray neutral), army chips use the same threat colors, the marker
+glyph encodes morale (`*` ready, `o` shaken, `x` broken), battles display
+their odds (`9v7`), sieges show progress percent in place of the owner
+tag, and your selected army's destination is highlighted.
 
 ## Development
 

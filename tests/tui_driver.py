@@ -119,6 +119,8 @@ def main():
     expect(d, "TERRAIN", "terrain mapmode")
     d.send("3", 0.3)
     expect(d, "DEVELOPMENT", "dev mapmode")
+    d.send("5", 0.3)
+    expect(d, "MILITARY", "military mapmode")
     d.send("1", 0.3)
     d.send("?", 0.4)
     expect(d, "GOAL", "help screen")

@@ -332,6 +332,9 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
     if me.allies:
         put("Allies: " + ", ".join(sorted(
             g.nations[t].name for t in me.allies)), pal.ui(4))
+    if me.rivals:
+        put("Rivals: " + ", ".join(sorted(
+            g.nations[t].name for t in me.rivals)), pal.ui(2))
     if me.fabricating:
         pid, left = me.fabricating
         put(f"Fabricating claim: {g.provinces[pid].name} ({left}m)",
@@ -408,6 +411,8 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
             rel = []
             if o.tag in me.allies:
                 rel.append("ALLY")
+            if o.tag in me.rivals or g.player in o.rivals:
+                rel.append("RIVAL")
             if g.at_war_with(g.player, o.tag):
                 rel.append("AT WAR")
             if g.truce_between(g.player, o.tag):
@@ -638,6 +643,8 @@ def show_ledger(scr, g: Game, pal: Palette):
             rel = "ally"
         elif g.at_war_with(g.player, t):
             rel = "WAR"
+        elif t in g.nations[g.player].rivals or g.player in n.rivals:
+            rel = "RIVAL"
         elif g.truce_between(g.player, t):
             rel = "truce"
         line = (f"{n.tag:4}{n.name:12}"
@@ -710,17 +717,22 @@ MILITARY  [Tab] cycle armies  [m] move (pick target, Enter)
       Battles favor numbers, morale and defensive terrain.
 
 DIPLOMACY  [c] fabricate claim on a border province (6 months)
-      [D] diplomacy menu: improve relations, alliances, declare
-      war, negotiate peace. Claims make wars cheaper and peace
-      deals stronger. Watch Aggressive Expansion - high AE
-      triggers hostile coalitions.
+      [D] diplomacy menu: improve relations, alliances, rivals,
+      declare war, negotiate peace. Claims make wars cheaper and
+      peace deals stronger. Rivals: declare up to 2 nearby peers;
+      opinions sour toward -40, envoys are refused, and peace
+      against a rival swings prestige. Watch Aggressive Expansion
+      - high AE triggers hostile coalitions.
 
-WAR   Warscore comes from occupations and battles won. Negotiate
-      peace from the diplomacy menu: demand provinces/gold or
-      offer concessions when losing. War exhaustion erodes morale.
-      Losing badly doubles exhaustion and risks stability; refusing
-      a fair peace offer costs stability outright. If one side
-      holds total warscore for a year, the loser must capitulate.
+WAR   Warscore comes from occupations and battles won. In claim
+      wars the side controlling the war-goal province also gains
+      a slow monthly warscore tick (up to +/-20), so holding the
+      goal decides stalled wars. Negotiate peace from the
+      diplomacy menu: demand provinces/gold or offer concessions
+      when losing. War exhaustion erodes morale. Losing badly
+      doubles exhaustion and risks stability; refusing a fair
+      peace offer costs stability outright. If one side holds
+      total warscore for a year, the loser must capitulate.
 
 OTHER [o] ledger  [g] chronicle  [S] save  [L] load  [q] quit
 """

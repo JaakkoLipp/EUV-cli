@@ -80,6 +80,7 @@ class War:
     dom_months: int = 0            # consecutive months at total domination
     refusals: int = 0              # rejected offers (escalates AI demands)
     no_offers_until: int = 0       # abs month; cooldown after a refusal
+    goal_score: float = 0.0        # ticking war-goal control, +/-20
 
     def side_of(self, tag: str) -> str | None:
         if tag in self.attackers:
@@ -125,6 +126,7 @@ class Nation:
     fabricating: tuple[int, int] | None = None                # (pid, months left)
     in_coalition_against: str | None = None
     last_war_month: int = 0        # abs month a war last started/ended
+    rivals: set[str] = field(default_factory=set)            # max 2 tags
 
     def opinion_of(self, other: str) -> float:
         return self.opinions.get(other, 0.0)

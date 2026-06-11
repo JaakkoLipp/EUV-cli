@@ -178,11 +178,18 @@ def hire_general(g: Game, aid: int):
     return True, f"{a.general_name} (skill {a.general}) takes command."
 
 
+def stability_cost(g: Game, tag: str) -> int:
+    """Base cost rises with current stability and with empire size."""
+    n = g.nations[tag]
+    base = data.STAB_COST + 40 * (n.stability + 3)
+    return int(base * (1 + g.total_dev(tag) / data.STAB_DEV_DIVISOR))
+
+
 def raise_stability(g: Game, tag: str):
     n = g.nations[tag]
     if n.stability >= data.MAX_STAB:
         return False, "Stability is already maximal."
-    cost = data.STAB_COST + 40 * (n.stability + 3)
+    cost = stability_cost(g, tag)
     if n.gold < cost:
         return False, f"Need {cost} gold."
     n.gold -= cost
@@ -210,13 +217,87 @@ def fabricate_claim(g: Game, tag: str, pid: int):
 
 
 def improve_relations(g: Game, tag: str, other: str):
-    n = g.nations[tag]
+    n, o = g.nations[tag], g.nations[other]
+    if other in n.rivals or tag in o.rivals:
+        return False, f"Impossible: {o.name} is a rival. End the " \
+                      f"rivalry first."
     if n.gold < data.IMPROVE_COST:
         return False, f"Need {data.IMPROVE_COST} gold."
     n.gold -= data.IMPROVE_COST
-    o = g.nations[other]
     o.opinions[tag] = min(100.0, o.opinion_of(tag) + 12)
     return True, f"Envoys sent to {o.name} (+12 opinion)."
+
+
+# ---------------------------------------------------------------- rivalries
+
+def rival_candidates(g: Game, tag: str) -> list[str]:
+    """Nearby nations (neighbours or their neighbours) of comparable
+    strength that could be declared rivals."""
+    n = g.nations[tag]
+
+    def neighbours_of(t: str) -> set[str]:
+        return {g.provinces[nb].owner for p in g.provinces_of(t)
+                for nb in p.neighbors if g.provinces[nb].owner != t}
+
+    near = neighbours_of(tag)
+    for t in list(near):
+        near |= neighbours_of(t)
+    near.discard(tag)
+    my = g.nation_strength(tag)
+    lo, hi = data.RIVAL_BAND
+    out = []
+    for t in sorted(near):
+        o = g.nations[t]
+        if not o.alive or t in n.allies or t in n.rivals:
+            continue
+        if my * lo <= g.nation_strength(t) <= my * hi:
+            out.append(t)
+    return out
+
+
+def declare_rival(g: Game, tag: str, other: str):
+    n, o = g.nations[tag], g.nations[other]
+    if other in n.rivals:
+        return False, f"{o.name} is already your rival."
+    if len(n.rivals) >= data.MAX_RIVALS:
+        return False, f"You can have at most {data.MAX_RIVALS} rivals."
+    if other in n.allies:
+        return False, "You cannot rival an ally."
+    if not o.alive:
+        return False, "That nation is no more."
+    if other not in rival_candidates(g, tag):
+        return False, ("Not a valid rival: they must be nearby and of "
+                       "comparable strength.")
+    n.rivals.add(other)
+    g.say("diplo", f"{n.name} declares {o.name} its rival!")
+    _maybe_reciprocate_rival(g, tag, other)
+    return True, f"{o.name} is now your rival."
+
+
+def end_rivalry(g: Game, tag: str, other: str):
+    n = g.nations[tag]
+    if other not in n.rivals:
+        return False, "They are not your rival."
+    n.rivals.discard(other)
+    n.prestige -= data.END_RIVAL_PRESTIGE
+    g.say("diplo", f"{n.name} sets aside its rivalry with "
+                   f"{g.nations[other].name}.")
+    return True, (f"Rivalry with {g.nations[other].name} ended "
+                  f"(-{data.END_RIVAL_PRESTIGE:.0f} prestige).")
+
+
+def _maybe_reciprocate_rival(g: Game, actor: str, target: str):
+    """The target of a rivalry usually answers in kind (AI only)."""
+    o = g.nations[target]
+    if o.is_player or not o.alive:
+        return
+    if actor in o.rivals or len(o.rivals) >= data.MAX_RIVALS \
+            or actor in o.allies:
+        return
+    if g.rng.random() < data.RIVAL_RECIPROCATE_CHANCE:
+        o.rivals.add(actor)
+        g.say("diplo", f"{o.name} answers in kind: "
+                       f"{g.nations[actor].name} is now its rival.")
 
 
 def offer_alliance(g: Game, tag: str, other: str):
@@ -332,8 +413,26 @@ def occupation_score(g: Game, w: War) -> float:
 
 
 def update_warscore(g: Game, w: War):
-    w.score = max(-100.0, min(100.0,
-                              occupation_score(g, w) + w.battles_score))
+    w.score = max(-100.0, min(100.0, occupation_score(g, w)
+                              + w.battles_score + w.goal_score))
+
+
+def _tick_goal_score(g: Game, w: War):
+    """The side controlling the war-goal province slowly gains warscore.
+
+    Control = the province's occupier if set, else its owner; allies on
+    either side count. This makes claim-wars decisive over time.
+    """
+    if w.cb_target is None or w.cb_target not in g.provinces:
+        return
+    p = g.provinces[w.cb_target]
+    holder = p.occupier or p.owner
+    if holder in w.attackers:
+        w.goal_score = min(data.GOAL_SCORE_CAP,
+                           w.goal_score + data.GOAL_SCORE_MONTHLY)
+    elif holder in w.defenders:
+        w.goal_score = max(-data.GOAL_SCORE_CAP,
+                           w.goal_score - data.GOAL_SCORE_MONTHLY)
 
 
 def province_peace_cost(g: Game, w: War, taker: str, pid: int) -> float:
@@ -437,6 +536,10 @@ def execute_peace(g: Game, w: War, winner: str, pids: list[int],
     win_side = w.attackers if w.side_of(winner) == "att" else w.defenders
     lose_side = w.defenders if w.side_of(winner) == "att" else w.attackers
     loser_leader = lose_side[0]
+    # prestige stakes between rivals (judged before any annexation)
+    rival_stake = (pids or gold > 0) and \
+        (loser_leader in g.nations[winner].rivals
+         or winner in g.nations[loser_leader].rivals)
     terms = []
     for pid in pids:
         p = g.provinces[pid]
@@ -460,6 +563,11 @@ def execute_peace(g: Game, w: War, winner: str, pids: list[int],
         lo.gold -= gold
         g.nations[winner].gold += pay
         terms.append(f"{gold:.0f} gold")
+    if rival_stake:
+        g.nations[winner].prestige += data.RIVAL_PRESTIGE_STAKE
+        g.nations[loser_leader].prestige -= data.RIVAL_PRESTIGE_STAKE
+        g.say("diplo", f"{g.nations[winner].name} humbles its rival "
+                       f"{g.nations[loser_leader].name}!")
     # lift occupations between the two sides, set truces
     for tag in win_side + lose_side:
         for p in g.provinces_of(tag):
@@ -518,6 +626,7 @@ def _eliminate(g: Game, tag: str, by: str):
             del g.wars[w.wid]
     for o in g.nations.values():
         o.allies.discard(tag)
+        o.rivals.discard(tag)
         o.truces.pop(tag, None)
         if o.in_coalition_against == tag:
             o.in_coalition_against = None
@@ -552,6 +661,7 @@ def advance_month(g: Game, ai_module=None):
     _attrition_and_recovery(g)
     _diplomacy_phase(g)
     for w in g.wars.values():
+        _tick_goal_score(g, w)
         update_warscore(g, w)
     if ai_module:
         ai_module.run_all(g)
@@ -887,9 +997,19 @@ def _diplomacy_phase(g: Game):
     for tag, n in g.nations.items():
         if not n.alive:
             continue
+        _rivals_phase(g, tag)
+        # opinions drift toward 0, or toward -40 between rivals
+        hostile = set(n.rivals)
+        hostile |= {t for t, o in g.nations.items()
+                    if o.alive and tag in o.rivals}
+        for r in hostile:
+            n.opinions.setdefault(r, 0.0)
         for other in list(n.opinions):
             v = n.opinions[other]
-            n.opinions[other] = v - min(0.5, max(-0.5, v * 0.01))
+            target = (data.RIVAL_OPINION_TARGET if other in hostile
+                      else 0.0)
+            n.opinions[other] = v - min(0.5, max(-0.5,
+                                                 (v - target) * 0.01))
         for other in list(n.ae):
             n.ae[other] = max(0.0, n.ae[other]
                               - data.AE_DECAY_PER_YEAR / 12)
@@ -899,6 +1019,35 @@ def _diplomacy_phase(g: Game):
             if n.ae.get(t, 0) < data.COALITION_AE_THRESHOLD * 0.6 \
                     or not g.nations[t].alive:
                 n.in_coalition_against = None
+
+
+def _rivals_phase(g: Game, tag: str):
+    """Drop invalid rivals; AI occasionally picks a new one.
+
+    Rivalries are sticky: a slot only re-opens when a rival dies or
+    becomes an ally.
+    """
+    n = g.nations[tag]
+    for r in list(n.rivals):
+        o = g.nations.get(r)
+        if o is None or not o.alive or r in n.allies:
+            n.rivals.discard(r)
+    if n.is_player or len(n.rivals) >= data.MAX_RIVALS:
+        return
+    if g.rng.random() > data.RIVAL_PICK_CHANCE:
+        return
+    cands = rival_candidates(g, tag)
+    if not cands:
+        return
+    # prefer answering someone who already rivals us, else the
+    # strongest candidate; same-culture grudges weigh a little extra
+    recip = [t for t in cands if tag in g.nations[t].rivals]
+    pool = recip or cands
+    pick = max(pool, key=lambda t: g.nation_strength(t)
+               * (1.15 if g.nations[t].culture == n.culture else 1.0))
+    n.rivals.add(pick)
+    g.say("diplo", f"{n.name} declares {g.nations[pick].name} its rival!")
+    _maybe_reciprocate_rival(g, tag, pick)
 
 
 def _events_phase(g: Game):

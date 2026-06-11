@@ -101,6 +101,7 @@ def _diplomacy(g: Game, tag: str):
         cands = [t for t in neighbours
                  if t not in n.allies and not g.truce_between(tag, t)
                  and not g.nations[t].is_player
+                 and t not in n.rivals and tag not in g.nations[t].rivals
                  and g.nations[t].ae.get(tag, 0) < 30]
         if cands:
             pick = max(cands, key=lambda t: g.nation_strength(t)
@@ -111,20 +112,22 @@ def _diplomacy(g: Game, tag: str):
             elif n.gold > 60:
                 engine.improve_relations(g, tag, pick)
 
-    # fabricate claims on tempting weak neighbours
+    # fabricate claims on tempting weak neighbours (rivals always tempt)
     if not at_war and n.fabricating is None and rng.random() < 0.08:
         targets = []
         for t in neighbours:
             if g.truce_between(tag, t) or t in n.allies:
                 continue
-            if g.nation_strength(tag) > g.nation_strength(t) * 1.1:
+            if g.nation_strength(tag) > g.nation_strength(t) * 1.1 \
+                    or t in n.rivals:
                 border = [p.pid for p in g.provinces_of(t)
                           if any(g.provinces[nb].owner == tag
                                  for nb in p.neighbors)
                           and p.pid not in n.claims]
                 targets += border
         if targets:
-            pid = max(targets, key=lambda pid: g.provinces[pid].dev)
+            pid = max(targets, key=lambda pid: g.provinces[pid].dev
+                      + (12 if g.provinces[pid].owner in n.rivals else 0))
             engine.fabricate_claim(g, tag, pid)
 
     # declare war when clearly stronger (claims make it likelier);
@@ -152,6 +155,8 @@ def _diplomacy(g: Game, tag: str):
             need -= min(0.4, peace_years * 0.03)
             if g.wars_of(t):
                 need -= 0.25          # they are busy elsewhere
+            if t in n.rivals or tag in o.rivals:
+                need -= data.RIVAL_NEED_BONUS   # old grudges burn hot
             if n.opinion_of(t) > 40:
                 need += 0.5
             need = max(1.1, need)

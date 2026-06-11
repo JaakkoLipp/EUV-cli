@@ -10,6 +10,8 @@ echo "== peace pressure mechanics =="
 python3 tests/test_peace.py | tail -1
 echo "== supply & attrition mechanics =="
 python3 tests/test_attrition.py | tail -1
+echo "== rivalries, war goals, stability scaling =="
+python3 tests/test_rivals.py | tail -1
 echo "== TUI: scripted session =="
 python3 tests/tui_driver.py | tail -1
 echo "== TUI: war & peace flow =="

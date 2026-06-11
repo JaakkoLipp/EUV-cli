@@ -28,6 +28,20 @@ AE_DECAY_PER_YEAR = 2.5
 COALITION_AE_THRESHOLD = 35.0
 TRUCE_YEARS = 5
 
+MAX_RIVALS = 2
+RIVAL_PICK_CHANCE = 0.04   # monthly chance an AI looks for a rival
+RIVAL_RECIPROCATE_CHANCE = 0.75  # chance the target rivals back
+RIVAL_BAND = (0.5, 2.0)    # rival strength range relative to own
+RIVAL_OPINION_TARGET = -40.0     # opinions drift here between rivals
+RIVAL_NEED_BONUS = 0.3     # AI war threshold drop against rivals
+RIVAL_PRESTIGE_STAKE = 10.0      # peace prestige swing between rivals
+END_RIVAL_PRESTIGE = 10.0  # prestige cost to call off a rivalry
+
+GOAL_SCORE_MONTHLY = 0.3   # warscore tick for holding the war goal
+GOAL_SCORE_CAP = 20.0
+
+STAB_DEV_DIVISOR = 250.0   # stability cost *= 1 + total_dev / this
+
 CLAIM_COST = 20            # gold to fabricate a claim (takes months)
 CLAIM_MONTHS = 6
 IMPROVE_COST = 15          # improve relations action

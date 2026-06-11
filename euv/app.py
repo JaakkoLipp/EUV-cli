@@ -416,10 +416,12 @@ def nation_diplomacy(stdscr, g, pal, ui, target):
     me = g.nations[g.player]
     o = g.nations[target]
     at_war = g.at_war_with(g.player, target)
+    rivalry = target in me.rivals or g.player in o.rivals
     info = [f"{o.name} - {o.ruler}",
             f"Opinion of you {o.opinion_of(g.player):+.0f}, "
             f"AE {o.ae.get(g.player, 0):.0f}, "
-            f"dev {g.total_dev(target)}"]
+            f"dev {g.total_dev(target)}"
+            + ("  [RIVAL]" if rivalry else "")]
     opts = []
     actions = []
     if at_war:
@@ -434,6 +436,13 @@ def nation_diplomacy(stdscr, g, pal, ui, target):
         else:
             opts.append("Offer alliance")
             actions.append("ally")
+        if target in me.rivals:
+            opts.append(f"End rivalry "
+                        f"(-{data.END_RIVAL_PRESTIGE:.0f} prestige)")
+            actions.append("end_rival")
+        else:
+            opts.append(f"Declare rival (max {data.MAX_RIVALS})")
+            actions.append("rival")
         claim = next((pid for pid in me.claims
                       if g.provinces[pid].owner == target), None)
         cb = "claim" if claim is not None else \
@@ -454,6 +463,10 @@ def nation_diplomacy(stdscr, g, pal, ui, target):
         ok, msg = engine.offer_alliance(g, g.player, target)
     elif act == "break":
         ok, msg = engine.break_alliance(g, g.player, target)
+    elif act == "rival":
+        ok, msg = engine.declare_rival(g, g.player, target)
+    elif act == "end_rival":
+        ok, msg = engine.end_rivalry(g, g.player, target)
     elif act == "war":
         extra = ""
         if g.truce_between(g.player, target):

@@ -49,8 +49,9 @@ nations are ranked by score (development ×2 + prestige + treasury/20) —
 but the real goal is survival and dominance on your own terms.
 
 - **Economy** — provinces pay tax by development. Develop them, build
-  farms, markets, barracks, forts and temples, and keep stability up.
-  Going bankrupt shatters your realm.
+  farms, markets, barracks, forts and temples, and keep stability up
+  (raising it costs more the larger your realm grows). Going bankrupt
+  shatters your realm.
 - **Military** — recruit regiments against a force limit, maneuver army
   stacks, hire generals, and let armies siege enemy provinces (or retake
   your own). Battles weigh numbers, morale, generals, dice and defensive
@@ -61,9 +62,16 @@ but the real goal is survival and dominance on your own terms.
   attrition, so doomstacks bleed — spread out. Toggle reinforcement per
   army with `i` to stop a wounded stack draining your manpower. The game
   autosaves every January.
-- **Diplomacy** — opinions, alliances, truces and calls to arms.
-  Fabricate claims to get cheap casus belli. Warscore from occupations
-  and battles buys provinces and gold at the peace table.
+- **Diplomacy** — opinions, alliances, truces, rivalries and calls to
+  arms. Declare up to two nearby peers as rivals: opinions between
+  rivals sour toward -40, envoys are refused, the AI itches for rival
+  wars, and beating a rival at the peace table swings prestige both
+  ways. Fabricate claims to get cheap casus belli. Warscore from
+  occupations, battles and war-goal control buys provinces and gold at
+  the peace table.
+- **War goals** — in claim wars, whichever side controls the claimed
+  province gains a slow monthly warscore tick (up to +/-20), so wars
+  over a goal resolve decisively instead of stalling forever.
 - **Aggressive expansion** — every conquest scares the neighbours.
   Push too fast and a hostile coalition will form and strike.
 - **Missions** — rotating objectives (conquest, development, alliances…)
@@ -116,6 +124,7 @@ fully headless-testable; the curses UI sits on top.
 ```sh
 bash tests/run_all.sh           # everything below
 python3 tests/sim.py 7 100      # 100-year all-AI balance simulation
+python3 tests/test_rivals.py    # rivalries, war goals, stability costs
 python3 tests/tui_driver.py     # scripted TUI session in a pty (pyte)
 python3 tests/tui_war.py        # war & peace-negotiation UI flow
 python3 tests/tui_campaign.py   # full campaign: march, siege, peace

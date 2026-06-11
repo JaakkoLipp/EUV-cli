@@ -127,23 +127,34 @@ def _diplomacy(g: Game, tag: str):
             pid = max(targets, key=lambda pid: g.provinces[pid].dev)
             engine.fabricate_claim(g, tag, pid)
 
-    # declare war when clearly stronger (claims make it likelier)
+    # declare war when clearly stronger (claims make it likelier);
+    # long peace breeds ambition, and distracted targets invite attack
     aggression = 0.035 if n.culture in ("valdric", "tervani") else 0.025
+    peace_years = max(0.0, (g.abs_month - n.last_war_month) / 12)
+    aggression *= 1 + min(1.0, peace_years * 0.08)
     if not at_war and n.stability >= 0 and rng.random() < aggression:
+        # count only allies who would actually answer a call to arms
+        my = g.nation_strength(tag) + sum(
+            g.nation_strength(a) * 0.5 for a in n.allies
+            if not g.wars_of(a)
+            and g.nations[a].opinion_of(tag) >= 0)
         best, best_ratio = None, 0.0
         for t in neighbours:
             o = g.nations[t]
             if g.truce_between(tag, t) or t in n.allies or not o.alive:
                 continue
-            my = g.nation_strength(tag) + sum(
-                g.nation_strength(a) * 0.5 for a in n.allies)
             their = g.nation_strength(t) + sum(
-                g.nation_strength(a) * 0.7 for a in o.allies)
+                g.nation_strength(a) * 0.7 for a in o.allies
+                if not g.wars_of(a))
             ratio = my / max(their, 1)
             has_claim = any(g.provinces[c].owner == t for c in n.claims)
             need = 1.3 if has_claim else 1.7
+            need -= min(0.4, peace_years * 0.03)
+            if g.wars_of(t):
+                need -= 0.25          # they are busy elsewhere
             if n.opinion_of(t) > 40:
                 need += 0.5
+            need = max(1.1, need)
             if ratio > need and ratio > best_ratio:
                 best, best_ratio = t, ratio
         if best:
@@ -234,22 +245,32 @@ def _dist(g: Game, a: int, b: int) -> float:
 def _consider_peace(g: Game, tag: str):
     n = g.nations[tag]
     for w in list(g.wars_of(tag)):
+        if not n.alive:
+            break               # a surrender above annexed us
+        if w.wid not in g.wars or w.side_of(tag) is None:
+            continue            # war ended while we negotiated another
         leader = (w.attackers if w.side_of(tag) == "att" else w.defenders)[0]
         if leader != tag:
             continue            # only war leaders negotiate
         enemy_leader = w.enemies_of(tag)[0]
         my = w.score_for(tag)
         months = g.abs_month - (w.start[0] * 12 + w.start[1])
+        if g.abs_month < w.no_offers_until:
+            continue            # our last offer was rebuffed; let them stew
         # losing badly or exhausted: sue for peace
         if (my < -35 or (n.war_exhaustion > 9 and my < 10)
                 or (not g.armies_of(tag) and n.manpower < 800)):
             give = _pick_concessions(g, w, enemy_leader, tag, -my)
+            # never gift away the capital: total annexation must be
+            # taken by the victor, not offered by the victim
+            give = [pid for pid in give if pid != n.capital]
             engine.offer_peace(g, w, tag, give, max(0.0, -my) * 1.2,
                                beneficiary=enemy_leader)
             continue
-        # winning enough: cash in
+        # winning enough: cash in (each refusal hardens the demands)
         if my > 30 and months > 12:
-            take = _pick_concessions(g, w, tag, enemy_leader, my - 8)
+            budget = min(my, my - 8 + w.refusals * 6)
+            take = _pick_concessions(g, w, tag, enemy_leader, budget)
             if take or my > 45:
                 engine.offer_peace(g, w, tag, take, 0 if take else my * 1.5)
         # stalemate fatigue: white peace

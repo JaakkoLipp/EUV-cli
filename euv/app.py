@@ -534,6 +534,9 @@ def process_popups(stdscr, g, pal):
             handle_alliance_popup(stdscr, g, pal, ev["alliance"])
         elif "cta" in ev:
             handle_cta_popup(stdscr, g, pal, ev["cta"])
+        elif "notice" in ev:
+            popup_text(stdscr, pal, ev["notice"]["title"],
+                       ev["notice"]["body"])
         elif "war_decl" in ev:
             w = g.wars.get(ev["war_decl"])
             if w and w.side_of(g.player) == "def":
@@ -584,12 +587,18 @@ def handle_peace_popup(stdscr, g, pal, offer):
         terms = ["White peace (status quo)"]
     body = (f"{kind}\n\n  " + "\n  ".join(terms)
             + f"\n\nYour warscore: {my:+.0f}%")
+    if engine.peace_refusal_penalty(g, w, offer):
+        refuse = (f"Refuse (-{data.REFUSAL_STAB_HIT} stability, "
+                  f"+{data.REFUSAL_WE_HIT:.0f} war exhaustion)")
+        body += "\nThe terms are fair; the court urges acceptance."
+    else:
+        refuse = "Refuse"
     sel = popup_text(stdscr, pal, f"Peace offer - {w.name}", body,
-                     ["Accept", "Refuse"])
+                     ["Accept", refuse])
     if sel == 0:
         engine.execute_peace(g, w, ben, pids, gold)
     else:
-        g.say("diplo", f"You refused the peace offer from {prop.name}.")
+        engine.refuse_peace(g, w, offer)
 
 
 def handle_alliance_popup(stdscr, g, pal, tag):

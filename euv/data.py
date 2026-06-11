@@ -40,6 +40,14 @@ MORALE_BASE = 3.0
 WAR_EXHAUSTION_MONTHLY = 0.08
 PEACE_GOLD_PER_WARSCORE = 2.2
 
+# peace pressure: holding out while beaten must hurt
+LOSING_BADLY = -50.0       # warscore at which war weariness accelerates
+REFUSAL_STAB_HIT = 1       # refusing a fair offer while losing
+REFUSAL_WE_HIT = 1.0
+REFUSAL_COOLDOWN_MONTHS = 8
+CAPITULATION_SCORE = 99.0  # total domination...
+CAPITULATION_MONTHS = 12   # ...held this long forces capitulation
+
 # ------------------------------------------------------------------ terrain
 
 # key: (display name, map glyph, color tag, defender bonus, dev cost mult)

@@ -41,6 +41,7 @@ def save(g: Game, path: str = SAVE_PATH):
             "allies": sorted(n.allies), "claims": sorted(n.claims),
             "fabricating": n.fabricating,
             "in_coalition_against": n.in_coalition_against,
+            "last_war_month": n.last_war_month,
         } for n in g.nations.values()],
         "armies": [{
             "aid": a.aid, "owner": a.owner, "location": a.location,
@@ -52,6 +53,8 @@ def save(g: Game, path: str = SAVE_PATH):
             "wid": w.wid, "attackers": w.attackers, "defenders": w.defenders,
             "cb_target": w.cb_target, "start": w.start, "score": w.score,
             "battles_score": w.battles_score, "name": w.name,
+            "dom_months": w.dom_months, "refusals": w.refusals,
+            "no_offers_until": w.no_offers_until,
         } for w in g.wars.values()],
     }
     tmp = path + ".tmp"
@@ -89,7 +92,8 @@ def load(path: str = SAVE_PATH) -> Game:
                    {k: int(v) for k, v in d["truces"].items()},
                    set(d["allies"]), set(d["claims"]),
                    tuple(d["fabricating"]) if d["fabricating"] else None,
-                   d["in_coalition_against"])
+                   d["in_coalition_against"],
+                   d.get("last_war_month", (s["year"] - 5) * 12))
         g.nations[n.tag] = n
     for d in s["armies"]:
         a = Army(d["aid"], d["owner"], d["location"], d["regiments"],
@@ -98,7 +102,9 @@ def load(path: str = SAVE_PATH) -> Game:
         g.armies[a.aid] = a
     for d in s["wars"]:
         w = War(d["wid"], d["attackers"], d["defenders"], d["cb_target"],
-                tuple(d["start"]), d["score"], d["battles_score"], d["name"])
+                tuple(d["start"]), d["score"], d["battles_score"], d["name"],
+                d.get("dom_months", 0), d.get("refusals", 0),
+                d.get("no_offers_until", 0))
         g.wars[w.wid] = w
     return g
 

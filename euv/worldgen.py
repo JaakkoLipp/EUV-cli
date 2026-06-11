@@ -332,3 +332,5 @@ def _assign_nations(g: Game, rng: random.Random):
             if na.culture == nb.culture:
                 base += 15
             na.opinions[b] = base
+    for n in g.nations.values():
+        n.last_war_month = g.abs_month

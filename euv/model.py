@@ -77,6 +77,9 @@ class War:
     score: float = 0.0
     battles_score: float = 0.0     # capped portion from battles
     name: str = ""
+    dom_months: int = 0            # consecutive months at total domination
+    refusals: int = 0              # rejected offers (escalates AI demands)
+    no_offers_until: int = 0       # abs month; cooldown after a refusal
 
     def side_of(self, tag: str) -> str | None:
         if tag in self.attackers:
@@ -121,6 +124,7 @@ class Nation:
     claims: set[int] = field(default_factory=set)             # province ids
     fabricating: tuple[int, int] | None = None                # (pid, months left)
     in_coalition_against: str | None = None
+    last_war_month: int = 0        # abs month a war last started/ended
 
     def opinion_of(self, other: str) -> float:
         return self.opinions.get(other, 0.0)

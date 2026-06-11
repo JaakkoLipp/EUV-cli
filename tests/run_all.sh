@@ -6,6 +6,8 @@ echo "== engine simulations =="
 for seed in 7 13 42 99; do
     python3 tests/sim.py "$seed" 100 > /dev/null && echo "sim seed $seed ok"
 done
+echo "== peace pressure mechanics =="
+python3 tests/test_peace.py | tail -1
 echo "== TUI: scripted session =="
 python3 tests/tui_driver.py | tail -1
 echo "== TUI: war & peace flow =="

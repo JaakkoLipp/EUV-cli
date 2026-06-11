@@ -320,6 +320,14 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
             vs = ", ".join(g.nations[t].name
                            for t in war.enemies_of(g.player))
             put(f" vs {vs}", curses.A_DIM)
+            if sc <= data.LOSING_BADLY:
+                put(" The realm tires of this war!", pal.ui(7))
+            if abs(war.score) >= data.CAPITULATION_SCORE:
+                left = max(1, data.CAPITULATION_MONTHS - war.dom_months)
+                label = ("Enemy capitulates" if sc > 0
+                         else "CAPITULATION")
+                put(f" {label} in {left} month(s)!",
+                    pal.ui(7) | curses.A_BOLD)
         put()
     if me.allies:
         put("Allies: " + ", ".join(sorted(
@@ -710,6 +718,9 @@ DIPLOMACY  [c] fabricate claim on a border province (6 months)
 WAR   Warscore comes from occupations and battles won. Negotiate
       peace from the diplomacy menu: demand provinces/gold or
       offer concessions when losing. War exhaustion erodes morale.
+      Losing badly doubles exhaustion and risks stability; refusing
+      a fair peace offer costs stability outright. If one side
+      holds total warscore for a year, the loser must capitulate.
 
 OTHER [o] ledger  [g] chronicle  [S] save  [L] load  [q] quit
 """

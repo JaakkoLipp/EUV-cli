@@ -300,6 +300,8 @@ def declare_war(g: Game, tag: str, target: str,
         g.pending_events.append({"war_decl": w.wid})
     if coalition:
         w.name = f"Coalition War against {t.name}"
+    for x in attackers + defenders:
+        g.nations[x].last_war_month = g.abs_month
     for x in attackers:
         for y in defenders:
             g.nations[y].opinions[x] = g.nations[y].opinion_of(x) - 50
@@ -394,6 +396,42 @@ def offer_peace(g: Game, w: War, proposer: str, demand_pids: list[int],
     return True, "Peace concluded."
 
 
+def peace_refusal_penalty(g: Game, w: War, offer: dict) -> bool:
+    """Refusing costs stability when the terms are fair and you are losing.
+
+    'Fair' = the demands are within the warscore the proposer has earned.
+    Refusing an enemy's surrender, or unearned demands, stays free.
+    """
+    recipient = (w.defenders if w.side_of(offer["proposer"]) == "att"
+                 else w.attackers)[0]
+    if w.side_of(offer["beneficiary"]) == w.side_of(recipient):
+        return False               # they are conceding to us
+    rec_score = w.score_for(recipient)
+    prop_score = w.score_for(offer["proposer"])
+    return rec_score <= -25 and offer["cost"] <= prop_score - 5
+
+
+def refuse_peace(g: Game, w: War, offer: dict) -> bool:
+    """Apply the consequences of the recipient rejecting an offer."""
+    recipient = (w.defenders if w.side_of(offer["proposer"]) == "att"
+                 else w.attackers)[0]
+    n = g.nations[recipient]
+    prop = g.nations[offer["proposer"]]
+    w.refusals += 1
+    w.no_offers_until = g.abs_month + data.REFUSAL_COOLDOWN_MONTHS
+    prop.opinions[recipient] = prop.opinion_of(recipient) - 10
+    if peace_refusal_penalty(g, w, offer):
+        n.stability = max(data.MIN_STAB,
+                          n.stability - data.REFUSAL_STAB_HIT)
+        n.war_exhaustion = min(15.0,
+                               n.war_exhaustion + data.REFUSAL_WE_HIT)
+        g.say("war", f"The court rejects {prop.name}'s terms; the war "
+                     f"grinds on. (-{data.REFUSAL_STAB_HIT} stability)")
+        return True
+    g.say("diplo", f"You refused the peace offer from {prop.name}.")
+    return False
+
+
 def execute_peace(g: Game, w: War, winner: str, pids: list[int],
                   gold: float):
     win_side = w.attackers if w.side_of(winner) == "att" else w.defenders
@@ -440,6 +478,7 @@ def execute_peace(g: Game, w: War, winner: str, pids: list[int],
         if tag in g.nations:
             g.nations[tag].war_exhaustion = max(
                 0.0, g.nations[tag].war_exhaustion - 2)
+            g.nations[tag].last_war_month = g.abs_month
     g.wars.pop(w.wid, None)   # may already be gone if a side was annexed
     _send_strays_home(g, win_side + lose_side)
     what = ", ".join(terms) if terms else "white peace"
@@ -518,9 +557,64 @@ def advance_month(g: Game, ai_module=None):
         ai_module.run_all(g)
     for w in g.wars.values():
         update_warscore(g, w)
+    _capitulation_phase(g)
     _missions_phase(g)
     _events_phase(g)
     _check_end(g)
+
+
+def _capitulation_phase(g: Game):
+    """A year of total domination forces the loser to capitulate.
+
+    This is the backstop that guarantees wars end even if the beaten
+    side refuses every offer: the winner dictates terms outright.
+    """
+    for w in list(g.wars.values()):
+        if abs(w.score) < data.CAPITULATION_SCORE:
+            w.dom_months = 0
+            continue
+        w.dom_months += 1
+        if w.dom_months < data.CAPITULATION_MONTHS:
+            continue
+        winner = (w.attackers if w.score > 0 else w.defenders)[0]
+        loser = (w.defenders if w.score > 0 else w.attackers)[0]
+        pids = _capitulation_terms(g, w, winner, loser)
+        name, loser_name = w.name, g.nations[loser].name
+        player_involved = bool(g.player) and w.side_of(g.player) is not None
+        execute_peace(g, w, winner, pids, 0)
+        g.say("war", f"{loser_name} capitulates! Total defeat in "
+                     f"the {name}.")
+        if player_involved:
+            g.pending_events.append({"notice": {
+                "title": "Capitulation!",
+                "body": f"After a year of total domination, {loser_name} "
+                        f"capitulates in the {name}. "
+                        f"{g.nations[winner].name} dictates the terms."}})
+
+
+def _capitulation_terms(g: Game, w: War, winner: str,
+                        loser: str) -> list[int]:
+    """Winner takes up to 100 warscore worth of the loser's provinces."""
+    win_side = w.attackers if w.side_of(winner) == "att" else w.defenders
+
+    def key(p):
+        s = float(p.dev)
+        if p.pid == w.cb_target:
+            s -= 40
+        if p.pid in g.nations[winner].claims:
+            s -= 25
+        if p.occupier in win_side:
+            s -= 20
+        return s
+
+    picks: list[int] = []
+    spent = 0.0
+    for p in sorted(g.provinces_of(loser), key=key):
+        cost = province_peace_cost(g, w, winner, p.pid)
+        if spent + cost <= 100.0:
+            picks.append(p.pid)
+            spent += cost
+    return picks
 
 
 def _movement_phase(g: Game):
@@ -743,8 +837,21 @@ def _attrition_and_recovery(g: Game):
         regen *= max(0.3, 1 - 0.05 * n.war_exhaustion)
         n.manpower = min(g.manpower_max(tag), n.manpower + regen)
         if at_war:
-            n.war_exhaustion = min(15.0, n.war_exhaustion
-                                   + data.WAR_EXHAUSTION_MONTHLY)
+            # losing badly makes the realm tire twice as fast, and the
+            # court starts demanding peace: refusing to end a lost war
+            # must not be free.
+            worst = min((w.score_for(tag) for w in g.wars_of(tag)),
+                        default=0.0)
+            tick = data.WAR_EXHAUSTION_MONTHLY
+            if worst <= data.LOSING_BADLY:
+                tick *= 2.0
+            n.war_exhaustion = min(15.0, n.war_exhaustion + tick)
+            if worst <= data.LOSING_BADLY and n.war_exhaustion >= 10 \
+                    and n.stability > data.MIN_STAB \
+                    and g.rng.random() < 0.10:
+                n.stability -= 1
+                if n.is_player:
+                    g.say("war", "The people demand peace! Stability falls.")
         else:
             n.war_exhaustion = max(0.0, n.war_exhaustion - 0.15)
         if n.fabricating:

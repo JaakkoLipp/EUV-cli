@@ -28,6 +28,20 @@ AE_DECAY_PER_YEAR = 2.5
 COALITION_AE_THRESHOLD = 35.0
 TRUCE_YEARS = 5
 
+MAX_RIVALS = 2
+RIVAL_PICK_CHANCE = 0.04   # monthly chance an AI looks for a rival
+RIVAL_RECIPROCATE_CHANCE = 0.75  # chance the target rivals back
+RIVAL_BAND = (0.5, 2.0)    # rival strength range relative to own
+RIVAL_OPINION_TARGET = -40.0     # opinions drift here between rivals
+RIVAL_NEED_BONUS = 0.3     # AI war threshold drop against rivals
+RIVAL_PRESTIGE_STAKE = 10.0      # peace prestige swing between rivals
+END_RIVAL_PRESTIGE = 10.0  # prestige cost to call off a rivalry
+
+GOAL_SCORE_MONTHLY = 0.3   # warscore tick for holding the war goal
+GOAL_SCORE_CAP = 20.0
+
+STAB_DEV_DIVISOR = 250.0   # stability cost *= 1 + total_dev / this
+
 CLAIM_COST = 20            # gold to fabricate a claim (takes months)
 CLAIM_MONTHS = 6
 IMPROVE_COST = 15          # improve relations action
@@ -39,6 +53,60 @@ GENERAL_COST = 50          # hire a general for an army
 MORALE_BASE = 3.0
 WAR_EXHAUSTION_MONTHLY = 0.08
 PEACE_GOLD_PER_WARSCORE = 2.2
+
+# supply & attrition: doomstacks bleed.
+# A province supplies SUPPLY_BASE + ceil(dev * SUPPLY_PER_DEV) regiments,
+# adjusted by terrain (SUPPLY_TERRAIN below) and +SUPPLY_FRIENDLY_BONUS
+# when the province owner is the army's owner or an ally. All of one
+# nation's regiments in a province are summed against the limit; the
+# excess causes monthly manpower loss (never refunded to the pool).
+SUPPLY_BASE = 3
+SUPPLY_PER_DEV = 0.6
+SUPPLY_FRIENDLY_BONUS = 2    # own or allied territory supplies better
+SUPPLY_TERRAIN = {"mountains": -2, "desert": -2, "marsh": -1}
+ATTRITION_PER_EXCESS = 0.03  # men lost per 100% above the supply limit
+ATTRITION_HOSTILE = 0.01     # surcharge on soil of a nation at war with us
+ATTRITION_MAX = 0.10         # monthly attrition ceiling
+
+# peace pressure: holding out while beaten must hurt
+LOSING_BADLY = -50.0       # warscore at which war weariness accelerates
+REFUSAL_STAB_HIT = 1       # refusing a fair offer while losing
+REFUSAL_WE_HIT = 1.0
+REFUSAL_COOLDOWN_MONTHS = 8
+CAPITULATION_SCORE = 99.0  # total domination...
+CAPITULATION_MONTHS = 12   # ...held this long forces capitulation
+
+# unrest & rebels
+REBEL_TAG = "REB"          # special hostile-to-all nation
+UNREST_MOVE_RATE = 0.15    # monthly drift when unrest is rising
+UNREST_DECAY_RATE = 0.04   # anger cools far slower than it rises
+UNREST_STAB_COEF = 1.5     # unrest per point of negative stability
+UNREST_WE_COEF = 0.4       # unrest per point of war exhaustion
+UNREST_TEMPLE = 2.0        # unrest removed by a temple
+UNREST_MAX = 10.0
+UNREST_REVOLT_AT = 8.0     # revolts possible at or above this
+UNREST_WARN_AT = 6.0       # UI warns at or above this
+UNREST_CONQUEST = 9.5      # separatist anger in a freshly taken province
+REVOLT_CHANCE_PER_POINT = 0.04  # monthly chance per point above 7
+UNREST_AFTER_REVOLT = 3.0
+REBEL_GRACE_MONTHS = 12    # rebel occupation before devastation starts
+
+# cores & overextension
+CORE_MONTHS = 120          # months of ownership before a province cores
+NON_CORE_TAX_MULT = 0.75   # tax penalty on non-cored provinces
+CORE_PEACE_DISCOUNT = 0.5  # peace cost multiplier when retaking a core
+CLAIM_PEACE_DISCOUNT = 0.6 # peace cost multiplier on claims / war goal
+CORE_RECONQUEST_AE = 0.5   # AE multiplier when retaking your core
+
+# vassals
+VASSAL_TRIBUTE_FRAC = 0.25     # share of positive net paid to overlord
+VASSALIZE_DEV_MULT = 0.6       # warscore cost = loser total dev * this
+VASSAL_AE_MULT = 0.5           # AE multiplier for vassalize / diplo-annex
+VASSAL_STRENGTH_SHARE = 0.6    # vassal strength counted for the overlord
+INDEPENDENCE_STRENGTH = 0.7    # vassal/overlord strength ratio to rebel
+INDEPENDENCE_CHANCE = 0.03     # monthly chance once strong enough
+ANNEX_VASSAL_MONTHS = 24       # integration time for diplomatic annexation
+ANNEX_MIN_VASSAL_MONTHS = 120  # vassalage required before integrating
 
 # ------------------------------------------------------------------ terrain
 

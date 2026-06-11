@@ -9,14 +9,16 @@ from euv import ai, engine, worldgen
 def run(seed=7, years=100, verbose=True):
     g = worldgen.generate(seed)
     g.player = ""   # all AI
-    start_nations = sum(1 for n in g.nations.values() if n.alive)
+    start_nations = sum(1 for n in g.nations.values()
+                    if n.alive and n.tag != 'REB')
     wars_seen = 0
     for _ in range(years * 12):
         before = len(g.wars)
         engine.advance_month(g, ai_module=ai)
         if len(g.wars) > before:
             wars_seen += len(g.wars) - before
-    alive = [t for t, n in g.nations.items() if n.alive]
+    alive = [t for t, n in g.nations.items()
+         if n.alive and t != 'REB']
     if verbose:
         print(f"seed={seed} after {years}y: {len(alive)}/{start_nations} "
               f"nations alive, {wars_seen} wars started, "

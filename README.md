@@ -49,18 +49,44 @@ nations are ranked by score (development ×2 + prestige + treasury/20) —
 but the real goal is survival and dominance on your own terms.
 
 - **Economy** — provinces pay tax by development. Develop them, build
-  farms, markets, barracks, forts and temples, and keep stability up.
-  Going bankrupt shatters your realm.
+  farms, markets, barracks, forts and temples, and keep stability up
+  (raising it costs more the larger your realm grows). Going bankrupt
+  shatters your realm.
 - **Military** — recruit regiments against a force limit, maneuver army
   stacks, hire generals, and let armies siege enemy provinces (or retake
   your own). Battles weigh numbers, morale, generals, dice and defensive
   terrain. Manpower is a slow-recovering pool; war exhaustion erodes
-  morale the longer you fight. The game autosaves every January.
-- **Diplomacy** — opinions, alliances, truces and calls to arms.
-  Fabricate claims to get cheap casus belli. Warscore from occupations
-  and battles buys provinces and gold at the peace table.
+  morale the longer you fight. Provinces have a **supply limit**
+  (3 + dev×0.6 regiments, less in mountains/desert/marsh, +2 on own or
+  allied soil): a nation's regiments stacked beyond it take monthly
+  attrition, so doomstacks bleed — spread out. Toggle reinforcement per
+  army with `i` to stop a wounded stack draining your manpower. The game
+  autosaves every January.
+- **Diplomacy** — opinions, alliances, truces, rivalries and calls to
+  arms. Declare up to two nearby peers as rivals: opinions between
+  rivals sour toward -40, envoys are refused, the AI itches for rival
+  wars, and beating a rival at the peace table swings prestige both
+  ways. Fabricate claims to get cheap casus belli. Warscore from
+  occupations, battles and war-goal control buys provinces and gold at
+  the peace table.
+- **War goals** — in claim wars, whichever side controls the claimed
+  province gains a slow monthly warscore tick (up to +/-20), so wars
+  over a goal resolve decisively instead of stalling forever.
+- **Vassals** — win a war hard enough and demand vassalization instead
+  of land: the loser keeps its provinces but pays tribute, follows you
+  into war, and may neither ally nor scheme. Attacking someone's vassal
+  means war with the overlord. After ten loyal years a vassal can be
+  diplomatically annexed (24 months); strong vassals declare wars of
+  independence, dragging their fellow subjects along.
+- **Cores & reconquest** — conquered provinces stay non-core for ten
+  years (-25% tax) while the old owner keeps a core there: a permanent
+  casus belli, half-price at the peace table and far less AE to retake.
 - **Aggressive expansion** — every conquest scares the neighbours.
   Push too fast and a hostile coalition will form and strike.
+- **Unrest & rebels** — negative stability, war exhaustion and fresh
+  conquests breed unrest (temples calm it). Provinces at high unrest
+  revolt, spawning rebel armies hostile to everyone; rebels besiege,
+  seize and slowly devastate provinces until an army retakes them.
 - **Missions** — rotating objectives (conquest, development, alliances…)
   that pay gold and prestige, and grant claims for conquest goals.
 - **A living world** — AI nations develop, ally, scheme, declare wars on
@@ -78,12 +104,13 @@ but the real goal is survival and dominance on your own terms.
 | `m` | Move selected army (pick destination, `Enter`) |
 | `x` / `X` | Split / disband army |
 | `G` | Hire a general for the selected army |
+| `i` | Toggle reinforcement for the selected army |
 | `r` / `R` | Recruit one regiment / up to force limit |
 | `d` / `b` | Develop province / build building |
 | `c` | Fabricate claim on a border province |
 | `D` | Diplomacy (relations, alliances, war, peace) |
 | `+` | Raise stability |
-| `1 2 3 4` | Map modes: political, terrain, development, diplomatic |
+| `1 2 3 4 5` | Map modes: political, terrain, development, diplomatic, military |
 | `o` / `g` | Ledger of nations / chronicle (full log) |
 | `?` | Help |
 | `S` / `L` / `q` | Save / load / quit |
@@ -92,6 +119,13 @@ Map legend: three-letter tags mark province owners, `*N` markers are army
 stacks (N regiments), `!` marks an active siege, striped provinces are
 occupied, `~` is the sea. Terrain glyphs: `.` plains, `f` forest,
 `n` hills, `^` mountains, `:` desert, `m` marsh.
+
+The **military map mode** (`5`) is built for wartime: terrain is tinted by
+your relation to the owner (green yours, cyan allied, red at-war, yellow
+truce, gray neutral), army chips use the same threat colors, the marker
+glyph encodes morale (`*` ready, `o` shaken, `x` broken), battles display
+their odds (`9v7`), sieges show progress percent in place of the owner
+tag, and your selected army's destination is highlighted.
 
 ## Development
 
@@ -103,6 +137,7 @@ fully headless-testable; the curses UI sits on top.
 ```sh
 bash tests/run_all.sh           # everything below
 python3 tests/sim.py 7 100      # 100-year all-AI balance simulation
+python3 tests/test_rivals.py    # rivalries, war goals, stability costs
 python3 tests/tui_driver.py     # scripted TUI session in a pty (pyte)
 python3 tests/tui_war.py        # war & peace-negotiation UI flow
 python3 tests/tui_campaign.py   # full campaign: march, siege, peace

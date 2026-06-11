@@ -110,7 +110,8 @@ def title_screen(stdscr, pal) -> str:
 
 
 def nation_select(stdscr, g: Game, pal) -> str | None:
-    tags = sorted(g.nations, key=lambda t: -g.total_dev(t))
+    tags = sorted((t for t in g.nations if t != data.REBEL_TAG),
+                  key=lambda t: -g.total_dev(t))
     opts = []
     for t in tags:
         n = g.nations[t]
@@ -188,7 +189,8 @@ def end_turn(stdscr, g, pal, ui, months=1):
 
 
 def final_scores(stdscr, g, pal):
-    rows = sorted((t for t, n in g.nations.items() if n.alive),
+    rows = sorted((t for t, n in g.nations.items()
+                   if n.alive and t != data.REBEL_TAG),
                   key=lambda t: -engine.score(g, t))
     lines = ["A century has passed. The chronicles record the great",
              "powers of the age:", ""]
@@ -244,6 +246,14 @@ def handle_key(stdscr, g, pal, ui, k) -> bool:
         if ui.sel_aid in g.armies and g.armies[ui.sel_aid].owner == g.player:
             ok, msg = engine.split_army(g, ui.sel_aid)
             ui.status = msg
+    elif k == ord("i"):
+        if ui.sel_aid in g.armies and g.armies[ui.sel_aid].owner == g.player:
+            a = g.armies[ui.sel_aid]
+            a.reinforce = not a.reinforce
+            ui.status = (f"{a.name}: reinforcement "
+                         f"{'on' if a.reinforce else 'off'}.")
+        else:
+            ui.status = "Select one of your armies first (Tab)."
     elif k == ord("X"):
         if ui.sel_aid in g.armies and g.armies[ui.sel_aid].owner == g.player:
             if popup_menu(stdscr, pal, "Disband army?",
@@ -290,7 +300,7 @@ def handle_key(stdscr, g, pal, ui, k) -> bool:
         show_log(stdscr, g, pal)
     elif k in (ord("?"), curses.KEY_F1):
         show_help(stdscr, pal)
-    elif k in (ord("1"), ord("2"), ord("3"), ord("4")):
+    elif k in (ord("1"), ord("2"), ord("3"), ord("4"), ord("5")):
         ui.mapmode = k - ord("0")
     elif k == ord(" "):
         end_turn(stdscr, g, pal, ui)
@@ -392,7 +402,8 @@ def diplomacy_menu(stdscr, g, pal, ui):
         target = g.provinces[ui.sel_pid].owner
     if target is None:
         tags = sorted((t for t, n in g.nations.items()
-                       if n.alive and t != g.player),
+                       if n.alive and t != g.player
+                       and t != data.REBEL_TAG),
                       key=lambda t: -g.total_dev(t))
         opts = [f"{g.nations[t].name:12} "
                 f"opinion {g.nations[t].opinion_of(g.player):+4.0f}"
@@ -408,15 +419,50 @@ def nation_diplomacy(stdscr, g, pal, ui, target):
     me = g.nations[g.player]
     o = g.nations[target]
     at_war = g.at_war_with(g.player, target)
+    rivalry = target in me.rivals or g.player in o.rivals
+    my_vassal = o.overlord == g.player
+    my_overlord = me.overlord == target
     info = [f"{o.name} - {o.ruler}",
             f"Opinion of you {o.opinion_of(g.player):+.0f}, "
             f"AE {o.ae.get(g.player, 0):.0f}, "
-            f"dev {g.total_dev(target)}"]
+            f"dev {g.total_dev(target)}"
+            + ("  [RIVAL]" if rivalry else "")]
+    if my_vassal:
+        info.append("Your vassal since "
+                    f"AE {o.vassal_since // 12}")
+    elif my_overlord:
+        info.append("Your overlord")
+    elif o.overlord:
+        info.append(f"Vassal of {g.nations[o.overlord].name} "
+                    f"(war redirects to the overlord)")
     opts = []
     actions = []
     if at_war:
         opts.append("Negotiate peace")
         actions.append("peace")
+    elif my_vassal:
+        opts.append(f"Improve relations ({data.IMPROVE_COST}g)")
+        actions.append("improve")
+        months = g.abs_month - o.vassal_since
+        need = data.ANNEX_MIN_VASSAL_MONTHS
+        if me.annexing and me.annexing[0] == target:
+            opts.append(f"Integrating... {me.annexing[1]} month(s) left")
+        elif months < need:
+            opts.append(f"Begin diplomatic annexation "
+                        f"(in {need - months}m)")
+        elif o.opinion_of(g.player) < 0:
+            opts.append("Begin diplomatic annexation (needs opinion 0+)")
+        else:
+            opts.append(f"Begin diplomatic annexation "
+                        f"({data.ANNEX_VASSAL_MONTHS} months)")
+        actions.append("annex")
+        opts.append("Release vassal (+5 prestige)")
+        actions.append("release")
+    elif my_overlord:
+        opts.append(f"Improve relations ({data.IMPROVE_COST}g)")
+        actions.append("improve")
+        opts.append("Declare independence!")
+        actions.append("independence")
     else:
         opts.append(f"Improve relations ({data.IMPROVE_COST}g)")
         actions.append("improve")
@@ -426,6 +472,13 @@ def nation_diplomacy(stdscr, g, pal, ui, target):
         else:
             opts.append("Offer alliance")
             actions.append("ally")
+        if target in me.rivals:
+            opts.append(f"End rivalry "
+                        f"(-{data.END_RIVAL_PRESTIGE:.0f} prestige)")
+            actions.append("end_rival")
+        else:
+            opts.append(f"Declare rival (max {data.MAX_RIVALS})")
+            actions.append("rival")
         claim = next((pid for pid in me.claims
                       if g.provinces[pid].owner == target), None)
         cb = "claim" if claim is not None else \
@@ -446,6 +499,28 @@ def nation_diplomacy(stdscr, g, pal, ui, target):
         ok, msg = engine.offer_alliance(g, g.player, target)
     elif act == "break":
         ok, msg = engine.break_alliance(g, g.player, target)
+    elif act == "rival":
+        ok, msg = engine.declare_rival(g, g.player, target)
+    elif act == "end_rival":
+        ok, msg = engine.end_rivalry(g, g.player, target)
+    elif act == "annex":
+        ok, msg = engine.start_annex_vassal(g, g.player, target)
+    elif act == "release":
+        conf = popup_menu(stdscr, pal, f"Release {o.name} from vassalage?",
+                          ["Release them", "Keep them"])
+        if conf != 0:
+            return
+        ok, msg = engine.release_vassal(g, g.player, target)
+    elif act == "independence":
+        conf = popup_menu(
+            stdscr, pal,
+            f"Rise against {o.name}? This means war with your "
+            f"overlord. Fellow vassals will join you.",
+            ["Declare independence!", "Endure"])
+        if conf != 0:
+            return
+        ok, msg = engine.declare_war(g, g.player, target,
+                                     independence=True)
     elif act == "war":
         extra = ""
         if g.truce_between(g.player, target):
@@ -479,17 +554,27 @@ def peace_menu(stdscr, g, pal, ui, target):
         ui.status = f"{g.nations[leader].name} leads this war; " \
                     f"only the war leader may negotiate."
         return
+    me = g.nations[g.player]
     my = w.score_for(g.player)
     enemy_leader = w.enemies_of(g.player)[0]
-    mode = popup_menu(
-        stdscr, pal, f"Peace: {w.name}",
-        ["Demand terms (you take)", "Offer concessions (you give)",
-         "Offer white peace"],
-        [f"Your warscore: {my:+.0f}%"])
+    opts = ["Demand terms (you take)", "Offer concessions (you give)",
+            "Offer white peace"]
+    can_vassalize = (my > 0 and not me.overlord
+                     and not g.nations[enemy_leader].overlord)
+    if can_vassalize:
+        vcost = engine.vassalize_cost(g, enemy_leader)
+        opts.append(f"Demand vassalization (cost {vcost:.0f}%)")
+    mode = popup_menu(stdscr, pal, f"Peace: {w.name}", opts,
+                      [f"Your warscore: {my:+.0f}%"])
     if mode is None:
         return
     if mode == 2:
         ok, msg = engine.offer_peace(g, w, g.player, [], 0)
+        ui.status = msg
+        return
+    if mode == 3:
+        ok, msg = engine.offer_peace(g, w, g.player, [], 0,
+                                     vassalize=True)
         ui.status = msg
         return
     if mode == 0:
@@ -534,6 +619,9 @@ def process_popups(stdscr, g, pal):
             handle_alliance_popup(stdscr, g, pal, ev["alliance"])
         elif "cta" in ev:
             handle_cta_popup(stdscr, g, pal, ev["cta"])
+        elif "notice" in ev:
+            popup_text(stdscr, pal, ev["notice"]["title"],
+                       ev["notice"]["body"])
         elif "war_decl" in ev:
             w = g.wars.get(ev["war_decl"])
             if w and w.side_of(g.player) == "def":
@@ -571,6 +659,7 @@ def handle_peace_popup(stdscr, g, pal, offer):
     ben = offer["beneficiary"]
     pids = offer["pids"]
     gold = offer["gold"]
+    vassalize = offer.get("vassalize", False)
     my = w.score_for(g.player)
     if ben == g.player or (w.side_of(ben) == w.side_of(g.player)):
         kind = f"{prop.name} offers to surrender:"
@@ -578,18 +667,32 @@ def handle_peace_popup(stdscr, g, pal, offer):
         kind = f"{prop.name} demands:"
     terms = [g.provinces[pid].name + f" (dev {g.provinces[pid].dev})"
              for pid in pids if pid in g.provinces]
+    if vassalize:
+        if w.side_of(ben) == w.side_of(g.player):
+            terms.append(f"{prop.name} becomes a vassal of "
+                         f"{g.nations[ben].name}")
+        else:
+            kind = (f"{g.nations[ben].name} demands that you become "
+                    f"their vassal!")
     if gold > 0:
         terms.append(f"{gold:.0f} gold")
     if not terms:
-        terms = ["White peace (status quo)"]
+        terms = (["Vassalage (you keep your lands, lose your voice)"]
+                 if vassalize else ["White peace (status quo)"])
     body = (f"{kind}\n\n  " + "\n  ".join(terms)
             + f"\n\nYour warscore: {my:+.0f}%")
-    sel = popup_text(stdscr, pal, f"Peace offer - {w.name}", body,
-                     ["Accept", "Refuse"])
-    if sel == 0:
-        engine.execute_peace(g, w, ben, pids, gold)
+    if engine.peace_refusal_penalty(g, w, offer):
+        refuse = (f"Refuse (-{data.REFUSAL_STAB_HIT} stability, "
+                  f"+{data.REFUSAL_WE_HIT:.0f} war exhaustion)")
+        body += "\nThe terms are fair; the court urges acceptance."
     else:
-        g.say("diplo", f"You refused the peace offer from {prop.name}.")
+        refuse = "Refuse"
+    sel = popup_text(stdscr, pal, f"Peace offer - {w.name}", body,
+                     ["Accept", refuse])
+    if sel == 0:
+        engine.execute_peace(g, w, ben, pids, gold, vassalize=vassalize)
+    else:
+        engine.refuse_peace(g, w, offer)
 
 
 def handle_alliance_popup(stdscr, g, pal, tag):

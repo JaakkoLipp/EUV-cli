@@ -20,12 +20,16 @@ class Palette:
     T_BG = 90        # terrain backgrounds
     DEV = 110        # development heat
     UI = 130         # ui pairs
+    MIL = 150        # military mode terrain: own/ally/enemy/truce/neutral
+    CHIP = 160       # military mode army chips: own/ally/enemy/neutral
 
+    # last entry (gray) is reserved for the REB rebel nation
     NATION_256 = [167, 68, 71, 178, 133, 208, 37, 168, 101, 107,
-                  73, 131, 144, 246]
+                  73, 131, 144, 246, 240]
     NATION_8 = [curses.COLOR_RED, curses.COLOR_BLUE, curses.COLOR_GREEN,
                 curses.COLOR_YELLOW, curses.COLOR_MAGENTA,
-                curses.COLOR_CYAN, curses.COLOR_WHITE]
+                curses.COLOR_CYAN, curses.COLOR_WHITE,
+                curses.COLOR_WHITE]
     TERRAIN_256 = {"plains": 106, "forest": 28, "hills": 137,
                    "mountains": 245, "desert": 179, "marsh": 65}
     TERRAIN_8 = {"plains": curses.COLOR_GREEN, "forest": curses.COLOR_GREEN,
@@ -52,6 +56,12 @@ class Palette:
                 curses.init_pair(self.DEV + i, black, c)
             self.dev_levels = len(self.DEV_256)
             curses.init_pair(self.UI + 0, 250, 17)      # sea
+            for i, (fg, bg) in enumerate([(252, 22), (252, 24), (252, 52),
+                                          (250, 58), (245, 235)]):
+                curses.init_pair(self.MIL + i, fg, bg)
+            for i, (fg, bg) in enumerate([(16, 40), (16, 45), (231, 160),
+                                          (16, 250)]):
+                curses.init_pair(self.CHIP + i, fg, bg)
         else:
             for i, c in enumerate(self.NATION_8):
                 curses.init_pair(self.N_BG + i, black, c)
@@ -64,6 +74,16 @@ class Palette:
             self.dev_levels = len(self.DEV_8)
             curses.init_pair(self.UI + 0, curses.COLOR_CYAN,
                              curses.COLOR_BLUE)
+            white, red = curses.COLOR_WHITE, curses.COLOR_RED
+            green, cyan = curses.COLOR_GREEN, curses.COLOR_CYAN
+            yellow = curses.COLOR_YELLOW
+            for i, (fg, bg) in enumerate([(black, green), (black, cyan),
+                                          (white, red), (black, yellow),
+                                          (white, black)]):
+                curses.init_pair(self.MIL + i, fg, bg)
+            for i, (fg, bg) in enumerate([(black, green), (black, cyan),
+                                          (white, red), (black, white)]):
+                curses.init_pair(self.CHIP + i, fg, bg)
         # generic ui pairs
         curses.init_pair(self.UI + 1, curses.COLOR_BLACK,
                          curses.COLOR_WHITE)                   # status bar
@@ -92,13 +112,20 @@ class Palette:
     def sea(self):
         return curses.color_pair(self.UI + 0)
 
+    def mil(self, rel: int) -> int:
+        return curses.color_pair(self.MIL + rel)
+
+    def chip(self, rel: int) -> int:
+        return curses.color_pair(self.CHIP + min(rel, 3))
+
     def ui(self, i: int) -> int:
         return curses.color_pair(self.UI + i)
 
     def log_attr(self, cat: str) -> int:
         return {"war": self.ui(2), "battle": self.ui(3),
                 "siege": self.ui(3), "diplo": self.ui(4),
-                "econ": self.ui(5), "event": self.ui(6)}.get(cat, 0)
+                "econ": self.ui(5), "event": self.ui(6),
+                "revolt": self.ui(2)}.get(cat, 0)
 
 
 def read_key(win) -> int:
@@ -138,6 +165,25 @@ def safe_addstr(win, y, x, s, attr=0):
 
 # ------------------------------------------------------------------ the map
 
+def rel_to_player(g: Game, tag: str) -> int:
+    """0 own, 1 ally, 2 at war, 3 truce, 4 neutral (vs the player)."""
+    me = g.player
+    if not me or me not in g.nations:
+        return 4
+    if tag == me:
+        return 0
+    n = g.nations[me]
+    if tag in n.allies:
+        return 1
+    if g.nations[tag].overlord == me or n.overlord == tag:
+        return 1     # own vassals and your overlord fight beside you
+    if g.at_war_with(me, tag):
+        return 2
+    if g.truce_between(me, tag):
+        return 3
+    return 4
+
+
 def cell_attr(g: Game, pal: Palette, ui, x: int, y: int):
     """(char, attr) for one map cell."""
     pid = g.grid[y][x]
@@ -154,7 +200,7 @@ def cell_attr(g: Game, pal: Palette, ui, x: int, y: int):
         attr = pal.terrain_bg(p.terrain)
     elif mode == 3:     # development
         attr = pal.dev_bg(p.dev)
-    else:               # diplomatic
+    elif mode == 4:     # diplomatic
         me = g.player
         n = g.nations[me] if me in g.nations else None
         owner = p.owner
@@ -168,27 +214,37 @@ def cell_attr(g: Game, pal: Palette, ui, x: int, y: int):
             attr = pal.ui(3) | curses.A_REVERSE
         else:
             attr = pal.ui(1)
+    else:               # military: muted relationship tints; units pop
+        attr = pal.mil(rel_to_player(g, p.owner))
+        if p.occupier and (x + y) % 2 == 0:
+            attr = pal.mil(rel_to_player(g, p.occupier))
     if ui.sel_pid == pid:
         attr |= curses.A_BOLD
     return glyph, attr
 
 
 def draw_map(win, g: Game, pal: Palette, ui):
+    from . import engine
     win.erase()
     win.box()
     title = {1: "POLITICAL", 2: "TERRAIN", 3: "DEVELOPMENT",
-             4: "DIPLOMATIC"}[ui.mapmode]
+             4: "DIPLOMATIC", 5: "MILITARY"}[ui.mapmode]
     safe_addstr(win, 0, 2, f"[ Eryndor - {title} ]", curses.A_BOLD)
     for y in range(g.height):
         for x in range(g.width):
             ch, attr = cell_attr(g, pal, ui, x, y)
             safe_addstr(win, y + 1, x + 1, ch, attr)
+    sel_army = g.armies.get(ui.sel_aid) if ui.sel_aid is not None else None
     # province tags at centers
     for p in g.provinces.values():
         cx, cy = p.center
         if ui.mapmode == 1:
             label = p.owner
-            base = pal.nation_bg(g.nations[p.owner].color)
+            own = g.nations[p.owner]
+            # vassal tags carry the overlord's colors; cells stay theirs
+            col = (g.nations[own.overlord].color if own.overlord
+                   else own.color)
+            base = pal.nation_bg(col)
         elif ui.mapmode == 3:
             label = f"{p.dev:2d}"
             base = pal.dev_bg(p.dev)
@@ -196,10 +252,18 @@ def draw_map(win, g: Game, pal: Palette, ui):
             label = p.owner
             _, base = cell_attr(g, pal, ui, cx, cy)
         attr = base | curses.A_BOLD
+        if ui.mapmode == 5 and p.sieging:
+            # siege progress replaces the tag where it matters most
+            label = f"{min(99, int(p.siege_progress)):2d}%"
+            attr = pal.ui(7) | curses.A_BOLD
+        if (ui.mapmode == 5 and sel_army is not None
+                and sel_army.owner == g.player
+                and sel_army.move_target == p.pid):
+            attr = pal.ui(3) | curses.A_REVERSE | curses.A_BOLD
         if p.pid == ui.sel_pid:
             attr = base | curses.A_REVERSE | curses.A_BOLD
         safe_addstr(win, cy + 1, cx, label, attr)
-        if p.sieging:
+        if p.sieging and ui.mapmode != 5:
             safe_addstr(win, cy + 1, cx + len(label),
                         "!", pal.ui(7) | curses.A_BOLD)
     # armies
@@ -211,11 +275,31 @@ def draw_map(win, g: Game, pal: Palette, ui):
         cx, cy = p.center
         owners = {a.owner for a in armies}
         total = sum(a.regiments for a in armies)
-        marker = f"*{min(total, 99)}"
-        if len(owners) > 1:
+        if ui.mapmode == 5:
+            if len(owners) > 1:
+                # a battle: show the odds of the two biggest sides
+                by_owner: dict[str, int] = {}
+                for a in armies:
+                    by_owner[a.owner] = by_owner.get(a.owner, 0) \
+                        + a.regiments
+                top = sorted(by_owner.values(), reverse=True)
+                marker = f"{min(top[0], 99)}v{min(top[1], 99)}"
+                attr = pal.chip(2) | curses.A_BOLD
+            else:
+                o = next(iter(owners))
+                lead = max(armies, key=lambda a: a.men)
+                cap = engine.morale_max(g, o)
+                frac = lead.morale / cap if cap else 1.0
+                glyph = "*" if frac >= 0.66 else \
+                    ("o" if frac >= 0.33 else "x")
+                marker = f"{glyph}{min(total, 99)}"
+                attr = pal.chip(rel_to_player(g, o)) | curses.A_BOLD
+        elif len(owners) > 1:
+            marker = f"*{min(total, 99)}"
             attr = pal.ui(7) | curses.A_BOLD
         else:
             o = next(iter(owners))
+            marker = f"*{min(total, 99)}"
             attr = pal.nation_fg(g.nations[o].color)
             if o == g.player:
                 attr |= curses.A_UNDERLINE
@@ -229,8 +313,7 @@ def draw_map(win, g: Game, pal: Palette, ui):
                 break
         if spot is None:
             spot = (cx - 3, cy)
-        sel = (ui.sel_aid is not None and ui.sel_aid in g.armies
-               and g.armies[ui.sel_aid].location == pid)
+        sel = sel_army is not None and sel_army.location == pid
         if sel:
             attr |= curses.A_REVERSE
         safe_addstr(win, spot[1] + 1, spot[0] + 1, marker, attr)
@@ -320,16 +403,40 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
             vs = ", ".join(g.nations[t].name
                            for t in war.enemies_of(g.player))
             put(f" vs {vs}", curses.A_DIM)
+            if sc <= data.LOSING_BADLY:
+                put(" The realm tires of this war!", pal.ui(7))
+            if abs(war.score) >= data.CAPITULATION_SCORE:
+                left = max(1, data.CAPITULATION_MONTHS - war.dom_months)
+                label = ("Enemy capitulates" if sc > 0
+                         else "CAPITULATION")
+                put(f" {label} in {left} month(s)!",
+                    pal.ui(7) | curses.A_BOLD)
         put()
     if me.allies:
         put("Allies: " + ", ".join(sorted(
             g.nations[t].name for t in me.allies)), pal.ui(4))
+    vassals = g.vassals_of(g.player)
+    if vassals:
+        put("Vassals: " + ", ".join(
+            g.nations[t].name for t in vassals), pal.ui(4))
+    if me.overlord:
+        put(f"Vassal of {g.nations[me.overlord].name}", pal.ui(3))
+    if me.annexing:
+        vt, left = me.annexing
+        put(f"Integrating {g.nations[vt].name} ({left}m)", pal.ui(6))
+    if me.rivals:
+        put("Rivals: " + ", ".join(sorted(
+            g.nations[t].name for t in me.rivals)), pal.ui(2))
     if me.fabricating:
         pid, left = me.fabricating
         put(f"Fabricating claim: {g.provinces[pid].name} ({left}m)",
             pal.ui(6))
     if me.war_exhaustion >= 3:
         put(f"War exhaustion: {me.war_exhaustion:.1f}", pal.ui(3))
+    hot = [p for p in g.provinces_of(g.player)
+           if p.unrest >= data.UNREST_WARN_AT]
+    if hot:
+        put(f"UNREST: {len(hot)} province(s) at revolt risk!", pal.ui(7))
     coalition = [o.name for o in g.nations.values()
                  if o.alive and o.in_coalition_against == g.player]
     if coalition:
@@ -351,7 +458,14 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
             put(f" {a.general_name} (skill {a.general})", pal.ui(5))
         if a.move_target is not None:
             put(f" Moving to {g.provinces[a.move_target].name}", pal.ui(3))
-        put(" [m]ove [x]split [X]disband [G]eneral", curses.A_DIM)
+        put(f" Reinforce: {'on' if a.reinforce else 'OFF'}   Supply here: "
+            f"{engine.supply_limit(g, a.owner, a.location)}")
+        att = engine.attrition_fraction(g, a)
+        if att > 0:
+            put(f" Taking attrition! (-{att * 100:.1f}%/month)",
+                pal.ui(2) | curses.A_BOLD)
+        put(" [m]ove [x]split [X]disband", curses.A_DIM)
+        put(" [G]eneral [i]reinforce on/off", curses.A_DIM)
         put("-" * iw, curses.A_DIM)
 
     # --- selected province
@@ -364,6 +478,19 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
             put("  * Capital *", pal.ui(3))
         put(f" Dev {p.dev}   Fort {p.fort_level}   "
             f"Tax {p.tax_income():.2f}/m")
+        put(f" Supply limit: {engine.supply_limit(g, g.player, p.pid)}")
+        if p.unrest >= data.UNREST_WARN_AT:
+            put(f" Unrest {p.unrest:.1f}  REVOLT RISK!",
+                pal.ui(7) | curses.A_BOLD)
+        else:
+            put(f" Unrest {p.unrest:.1f}",
+                pal.ui(3) if p.unrest >= 3 else curses.A_DIM)
+        if p.cores != {p.owner}:
+            names = ", ".join(g.nations[t].name for t in sorted(p.cores)
+                              if t in g.nations) or "none"
+            warn = "" if p.owner in p.cores else "  (non-core tax!)"
+            put(f" Core of: {names}{warn}",
+                pal.ui(3) if p.owner not in p.cores else curses.A_DIM)
         if p.buildings:
             put(" Buildings: " + ", ".join(
                 data.BUILDINGS[b][0] for b in p.buildings))
@@ -397,9 +524,21 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
                 f"AE: {o.ae.get(g.player, 0):.0f}")
             put(f" Dev {g.total_dev(o.tag)}  "
                 f"Troops ~{sum(a.regiments for a in g.armies_of(o.tag))}r")
+            if o.overlord:
+                put(f" Vassal of {g.nations[o.overlord].name}", pal.ui(4))
+            ovas = g.vassals_of(o.tag)
+            if ovas:
+                put(" Vassals: " + ", ".join(
+                    g.nations[t].name for t in ovas), pal.ui(4))
             rel = []
+            if o.overlord == g.player:
+                rel.append("YOUR VASSAL")
+            if me.overlord == o.tag:
+                rel.append("YOUR OVERLORD")
             if o.tag in me.allies:
                 rel.append("ALLY")
+            if o.tag in me.rivals or g.player in o.rivals:
+                rel.append("RIVAL")
             if g.at_war_with(g.player, o.tag):
                 rel.append("AT WAR")
             if g.truce_between(g.player, o.tag):
@@ -413,7 +552,8 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
 
     # --- great powers, pinned to the bottom of the panel
     from . import engine as _e
-    rows_gp = sorted((t for t, n in g.nations.items() if n.alive),
+    rows_gp = sorted((t for t, n in g.nations.items()
+                      if n.alive and t != data.REBEL_TAG),
                      key=lambda t: -_e.score(g, t))
     block = min(6, len(rows_gp)) + 1
     start = h - 1 - block
@@ -444,7 +584,7 @@ def draw_log(scr, g: Game, pal: Palette, top: int, lines: int):
 def draw_keybar(scr, pal: Palette, ui, status: str = ""):
     h, w = scr.getmaxyx()
     keys = ("[Spc]turn [>]year [Tab]army [m]ove [r]ecruit [b]uild [d]ev "
-            "[c]laim [D]iplo [+]stab [o]ledger [g]log [1-4]map [?]help "
+            "[c]laim [D]iplo [+]stab [o]ledger [g]log [1-5]map [?]help "
             "[S]ave [q]uit")
     safe_addstr(scr, h - 1, 0, " " * (w - 1), pal.ui(1))
     text = status if status else keys
@@ -610,7 +750,8 @@ def popup_toggle_list(scr, pal: Palette, title: str,
 def show_ledger(scr, g: Game, pal: Palette):
     from . import engine
     h, w = scr.getmaxyx()
-    rows = sorted((t for t, n in g.nations.items() if n.alive),
+    rows = sorted((t for t, n in g.nations.items()
+                   if n.alive and t != data.REBEL_TAG),
                   key=lambda t: -engine.score(g, t))
     win = curses.newwin(h - 2, min(w - 2, 78), 1,
                         max(0, (w - 78) // 2))
@@ -626,10 +767,16 @@ def show_ledger(scr, g: Game, pal: Palette):
         rel = ""
         if t == g.player:
             rel = "YOU"
+        elif n.overlord == g.player:
+            rel = "vassal"
+        elif g.nations[g.player].overlord == t:
+            rel = "lord"
         elif t in g.nations[g.player].allies:
             rel = "ally"
         elif g.at_war_with(g.player, t):
             rel = "WAR"
+        elif t in g.nations[g.player].rivals or g.player in n.rivals:
+            rel = "RIVAL"
         elif g.truce_between(g.player, t):
             rel = "truce"
         line = (f"{n.tag:4}{n.name:12}"
@@ -685,6 +832,12 @@ forge alliances, win wars, take provinces. Score = dev*2 + prestige
 
 MAP   Arrows/hjkl move cursor - Enter selects province
       1 political  2 terrain  3 development  4 diplomatic
+      5 military: terrain tinted by relation (green you, cyan
+      ally, red at-war, yellow truce, gray neutral); army chips
+      colored the same way; marker glyph shows morale (* ready,
+      o shaken, x broken); battles show odds like 9v7; sieges
+      show progress % in place of the tag; your selected army's
+      destination is highlighted.
       Tags show owners; *N markers are armies; ! means siege.
 
 TURNS Space ends the turn (1 month). > plays up to 12 months,
@@ -697,19 +850,49 @@ ECONOMY  [d] develop province (+1 dev)   [b] build building
 MILITARY  [Tab] cycle armies  [m] move (pick target, Enter)
       [r] recruit one regiment  [R] recruit up to force limit
       [x] split army  [X] disband army  [G] hire a general
+      [i] toggle reinforcement for the selected army
       Generals add their skill to every battle die roll.
       Armies siege enemy provinces automatically when parked there.
       Battles favor numbers, morale and defensive terrain.
+      SUPPLY: a province feeds 3 + dev*0.6 regiments (less in
+      mountains/desert/marsh, +2 on own or allied soil). All your
+      regiments in one province count together; stacks above the
+      limit lose men every month - spread out or starve.
 
 DIPLOMACY  [c] fabricate claim on a border province (6 months)
-      [D] diplomacy menu: improve relations, alliances, declare
-      war, negotiate peace. Claims make wars cheaper and peace
-      deals stronger. Watch Aggressive Expansion - high AE
-      triggers hostile coalitions.
+      [D] diplomacy menu: improve relations, alliances, rivals,
+      declare war, negotiate peace. Claims make wars cheaper and
+      peace deals stronger. Rivals: declare up to 2 nearby peers;
+      opinions sour toward -40, envoys are refused, and peace
+      against a rival swings prestige. Watch Aggressive Expansion
+      - high AE triggers hostile coalitions.
+      VASSALS: win big and demand vassalization at the peace
+      table. Vassals pay tribute, fight your wars, and cannot
+      ally or declare wars. After 10 loyal years you may begin
+      diplomatic annexation (24 months); or release them for
+      prestige. Attacking a vassal means war with its overlord.
+      A strong vassal may declare independence - fellow vassals
+      rise with it.
 
-WAR   Warscore comes from occupations and battles won. Negotiate
-      peace from the diplomacy menu: demand provinces/gold or
-      offer concessions when losing. War exhaustion erodes morale.
+WAR   Warscore comes from occupations and battles won. In claim
+      wars the side controlling the war-goal province also gains
+      a slow monthly warscore tick (up to +/-20), so holding the
+      goal decides stalled wars. Negotiate peace from the
+      diplomacy menu: demand provinces/gold or offer concessions
+      when losing. War exhaustion erodes morale. Losing badly
+      doubles exhaustion and risks stability; refusing a fair
+      peace offer costs stability outright. If one side holds
+      total warscore for a year, the loser must capitulate.
+      CORES: conquered land is non-core (-25% tax) until held
+      10 years; old owners keep a core - a cheap reconquest CB
+      with half AE and half peace cost to take it back.
+
+UNREST  Negative stability and war exhaustion raise province
+      unrest (temples lower it; conquest spikes it). At 8+ a
+      province may revolt, spawning rebels hostile to everyone.
+      Rebels besiege and seize provinces; after a year of rebel
+      rule a province decays. Defeat the stack, then besiege to
+      retake your land.
 
 OTHER [o] ledger  [g] chronicle  [S] save  [L] load  [q] quit
 """

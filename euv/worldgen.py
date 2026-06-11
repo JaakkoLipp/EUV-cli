@@ -193,7 +193,21 @@ def generate(seed: int = 7) -> Game:
 
     _connect_islands(g)
     _assign_nations(g, rng)
+    make_rebels(g)
     return g
+
+
+def make_rebels(g: Game):
+    """The special REB nation: owns nothing, hostile to all, gray.
+
+    Also called on load for saves predating the rebel system.
+    """
+    if data.REBEL_TAG in g.nations:
+        return
+    g.nations[data.REBEL_TAG] = Nation(
+        tag=data.REBEL_TAG, name="Rebels", culture="aurean",
+        color=14, capital=min(g.provinces), ruler="The Mob",
+        gold=0.0, manpower=0.0, stability=0)
 
 
 def _connect_islands(g: Game):
@@ -311,7 +325,10 @@ def _assign_nations(g: Game, rng: random.Random):
 
     tags = list(g.nations)
     for pid, i in assignment.items():
-        g.provinces[pid].owner = tags[i]
+        p = g.provinces[pid]
+        p.owner = tags[i]
+        p.cores.add(tags[i])           # initial owners core their land
+        p.owner_since = g.abs_month
 
     # capitals are developed; give every nation a starting army
     for tag, n in g.nations.items():
@@ -332,3 +349,5 @@ def _assign_nations(g: Game, rng: random.Random):
             if na.culture == nb.culture:
                 base += 15
             na.opinions[b] = base
+    for n in g.nations.values():
+        n.last_war_month = g.abs_month

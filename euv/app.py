@@ -110,7 +110,8 @@ def title_screen(stdscr, pal) -> str:
 
 
 def nation_select(stdscr, g: Game, pal) -> str | None:
-    tags = sorted(g.nations, key=lambda t: -g.total_dev(t))
+    tags = sorted((t for t in g.nations if t != data.REBEL_TAG),
+                  key=lambda t: -g.total_dev(t))
     opts = []
     for t in tags:
         n = g.nations[t]
@@ -188,7 +189,8 @@ def end_turn(stdscr, g, pal, ui, months=1):
 
 
 def final_scores(stdscr, g, pal):
-    rows = sorted((t for t, n in g.nations.items() if n.alive),
+    rows = sorted((t for t, n in g.nations.items()
+                   if n.alive and t != data.REBEL_TAG),
                   key=lambda t: -engine.score(g, t))
     lines = ["A century has passed. The chronicles record the great",
              "powers of the age:", ""]
@@ -392,7 +394,8 @@ def diplomacy_menu(stdscr, g, pal, ui):
         target = g.provinces[ui.sel_pid].owner
     if target is None:
         tags = sorted((t for t, n in g.nations.items()
-                       if n.alive and t != g.player),
+                       if n.alive and t != g.player
+                       and t != data.REBEL_TAG),
                       key=lambda t: -g.total_dev(t))
         opts = [f"{g.nations[t].name:12} "
                 f"opinion {g.nations[t].opinion_of(g.player):+4.0f}"

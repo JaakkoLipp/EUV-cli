@@ -25,6 +25,7 @@ class Province:
     siege_progress: float = 0.0
     sieging: str | None = None      # tag currently sieging
     unrest: float = 0.0
+    reb_months: int = 0             # consecutive months under rebel rule
 
     @property
     def fort_level(self) -> int:
@@ -186,6 +187,10 @@ class Game:
         return sum(p.manpower_cap() for p in self.provinces_of(tag))
 
     def at_war_with(self, a: str, b: str) -> bool:
+        if a == b:
+            return False
+        if a == data.REBEL_TAG or b == data.REBEL_TAG:
+            return True            # rebels are hostile to everyone
         return any(w.side_of(a) and w.side_of(b)
                    and w.side_of(a) != w.side_of(b)
                    for w in self.wars.values())

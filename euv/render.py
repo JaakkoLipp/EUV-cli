@@ -21,11 +21,13 @@ class Palette:
     DEV = 110        # development heat
     UI = 130         # ui pairs
 
+    # last entry (gray) is reserved for the REB rebel nation
     NATION_256 = [167, 68, 71, 178, 133, 208, 37, 168, 101, 107,
-                  73, 131, 144, 246]
+                  73, 131, 144, 246, 240]
     NATION_8 = [curses.COLOR_RED, curses.COLOR_BLUE, curses.COLOR_GREEN,
                 curses.COLOR_YELLOW, curses.COLOR_MAGENTA,
-                curses.COLOR_CYAN, curses.COLOR_WHITE]
+                curses.COLOR_CYAN, curses.COLOR_WHITE,
+                curses.COLOR_WHITE]
     TERRAIN_256 = {"plains": 106, "forest": 28, "hills": 137,
                    "mountains": 245, "desert": 179, "marsh": 65}
     TERRAIN_8 = {"plains": curses.COLOR_GREEN, "forest": curses.COLOR_GREEN,
@@ -98,7 +100,8 @@ class Palette:
     def log_attr(self, cat: str) -> int:
         return {"war": self.ui(2), "battle": self.ui(3),
                 "siege": self.ui(3), "diplo": self.ui(4),
-                "econ": self.ui(5), "event": self.ui(6)}.get(cat, 0)
+                "econ": self.ui(5), "event": self.ui(6),
+                "revolt": self.ui(2)}.get(cat, 0)
 
 
 def read_key(win) -> int:
@@ -338,6 +341,10 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
             pal.ui(6))
     if me.war_exhaustion >= 3:
         put(f"War exhaustion: {me.war_exhaustion:.1f}", pal.ui(3))
+    hot = [p for p in g.provinces_of(g.player)
+           if p.unrest >= data.UNREST_WARN_AT]
+    if hot:
+        put(f"UNREST: {len(hot)} province(s) at revolt risk!", pal.ui(7))
     coalition = [o.name for o in g.nations.values()
                  if o.alive and o.in_coalition_against == g.player]
     if coalition:
@@ -372,6 +379,12 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
             put("  * Capital *", pal.ui(3))
         put(f" Dev {p.dev}   Fort {p.fort_level}   "
             f"Tax {p.tax_income():.2f}/m")
+        if p.unrest >= data.UNREST_WARN_AT:
+            put(f" Unrest {p.unrest:.1f}  REVOLT RISK!",
+                pal.ui(7) | curses.A_BOLD)
+        else:
+            put(f" Unrest {p.unrest:.1f}",
+                pal.ui(3) if p.unrest >= 3 else curses.A_DIM)
         if p.buildings:
             put(" Buildings: " + ", ".join(
                 data.BUILDINGS[b][0] for b in p.buildings))
@@ -421,7 +434,8 @@ def draw_sidebar(win, g: Game, pal: Palette, ui):
 
     # --- great powers, pinned to the bottom of the panel
     from . import engine as _e
-    rows_gp = sorted((t for t, n in g.nations.items() if n.alive),
+    rows_gp = sorted((t for t, n in g.nations.items()
+                      if n.alive and t != data.REBEL_TAG),
                      key=lambda t: -_e.score(g, t))
     block = min(6, len(rows_gp)) + 1
     start = h - 1 - block
@@ -618,7 +632,8 @@ def popup_toggle_list(scr, pal: Palette, title: str,
 def show_ledger(scr, g: Game, pal: Palette):
     from . import engine
     h, w = scr.getmaxyx()
-    rows = sorted((t for t, n in g.nations.items() if n.alive),
+    rows = sorted((t for t, n in g.nations.items()
+                   if n.alive and t != data.REBEL_TAG),
                   key=lambda t: -engine.score(g, t))
     win = curses.newwin(h - 2, min(w - 2, 78), 1,
                         max(0, (w - 78) // 2))
@@ -721,6 +736,13 @@ WAR   Warscore comes from occupations and battles won. Negotiate
       Losing badly doubles exhaustion and risks stability; refusing
       a fair peace offer costs stability outright. If one side
       holds total warscore for a year, the loser must capitulate.
+
+UNREST  Negative stability and war exhaustion raise province
+      unrest (temples lower it; conquest spikes it). At 8+ a
+      province may revolt, spawning rebels hostile to everyone.
+      Rebels besiege and seize provinces; after a year of rebel
+      rule a province decays. Defeat the stack, then besiege to
+      retake your land.
 
 OTHER [o] ledger  [g] chronicle  [S] save  [L] load  [q] quit
 """

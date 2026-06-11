@@ -193,7 +193,21 @@ def generate(seed: int = 7) -> Game:
 
     _connect_islands(g)
     _assign_nations(g, rng)
+    make_rebels(g)
     return g
+
+
+def make_rebels(g: Game):
+    """The special REB nation: owns nothing, hostile to all, gray.
+
+    Also called on load for saves predating the rebel system.
+    """
+    if data.REBEL_TAG in g.nations:
+        return
+    g.nations[data.REBEL_TAG] = Nation(
+        tag=data.REBEL_TAG, name="Rebels", culture="aurean",
+        color=14, capital=min(g.provinces), ruler="The Mob",
+        gold=0.0, manpower=0.0, stability=0)
 
 
 def _connect_islands(g: Game):

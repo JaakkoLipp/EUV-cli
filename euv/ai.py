@@ -8,12 +8,13 @@ from .model import Army, Game, Nation, War
 def run_all(g: Game):
     for tag in sorted(g.nations):
         n = g.nations[tag]
-        if not n.alive or n.is_player:
+        if not n.alive or n.is_player or tag == data.REBEL_TAG:
             continue
         _economy(g, tag)
         _diplomacy(g, tag)
         _military(g, tag)
         _consider_peace(g, tag)
+    _rebels(g)
     _coalitions(g)
 
 
@@ -165,7 +166,12 @@ def _diplomacy(g: Game, tag: str):
 
 def _military(g: Game, tag: str):
     enemies = g.enemies_of(tag)
-    if not enemies:
+    rebel_stacks = [a for a in g.armies.values()
+                    if a.owner == data.REBEL_TAG
+                    and g.provinces[a.location].owner == tag]
+    reb_occupied = [p for p in g.provinces_of(tag)
+                    if p.occupier == data.REBEL_TAG]
+    if not enemies and not rebel_stacks and not reb_occupied:
         # peacetime: drift the main stack home
         for a in g.armies_of(tag):
             if a.move_target is None and \
@@ -179,15 +185,16 @@ def _military(g: Game, tag: str):
     if not my_armies:
         return
     enemy_armies = [a for a in g.armies.values() if a.owner in enemies]
+    hostile = enemies | {data.REBEL_TAG}
 
     for a in my_armies:
         if a.morale < 1.0:      # recovering, stay put unless threatened
             continue
-        # 1) defend home: enemy army on our soil we can beat
+        # 1) defend home: enemy or rebel army on our soil we can beat
         threats = [e for e in enemy_armies
-                   if g.provinces[e.location].owner == tag]
+                   if g.provinces[e.location].owner == tag] + rebel_stacks
         threats = [e for e in threats if _local_power(g, a) >
-                   _enemy_power_at(g, enemies, e.location) * 1.05]
+                   _enemy_power_at(g, hostile, e.location) * 1.05]
         if threats:
             target = min(threats, key=lambda e: _dist(g, a.location,
                                                       e.location))
@@ -212,18 +219,38 @@ def _military(g: Game, tag: str):
             for p in g.provinces_of(et):
                 if p.occupier is None:
                     targets.append(p)
-        # liberate own soil under enemy occupation
+        # liberate own soil under enemy or rebel occupation
         targets += [p for p in g.provinces_of(tag) if p.occupier in enemies]
+        targets += reb_occupied
         if not targets:
             continue
         def value(p):
             d = _dist(g, a.location, p.pid)
             bonus = -6 if any(p.pid == w.cb_target
                               for w in g.wars_of(tag)) else 0
+            if p.occupier == data.REBEL_TAG:
+                bonus -= 8      # retaking home soil beats foreign sieges
             return d + p.fort_level * 1.5 + bonus
         best = min(targets, key=value)
         if best.pid != a.location:
             engine.move_army(g, a.aid, best.pid)
+
+
+def _rebels(g: Game):
+    """Rebel stacks besiege where they stand; the odd one wanders."""
+    for a in sorted(g.armies_of(data.REBEL_TAG), key=lambda a: a.aid):
+        if a.move_target is not None:
+            continue
+        p = g.provinces[a.location]
+        if p.occupier != data.REBEL_TAG:
+            continue            # still besieging this province
+        if g.rng.random() >= 0.10:
+            continue            # rebels rarely march
+        cands = [nb for nb in sorted(p.neighbors)
+                 if g.provinces[nb].owner == p.owner
+                 and g.provinces[nb].occupier != data.REBEL_TAG]
+        if cands:
+            a.move_target = g.rng.choice(cands)
 
 
 def _local_power(g: Game, a: Army) -> float:
@@ -312,7 +339,7 @@ def _pick_concessions(g: Game, w: War, taker: str, victim: str,
 def _coalitions(g: Game):
     """Nations with high AE attract defensive coalitions that may strike."""
     for target_tag, target in g.nations.items():
-        if not target.alive:
+        if not target.alive or target_tag == data.REBEL_TAG:
             continue
         members = [t for t, n in g.nations.items()
                    if n.alive and t != target_tag and not n.is_player

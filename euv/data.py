@@ -48,6 +48,19 @@ REFUSAL_COOLDOWN_MONTHS = 8
 CAPITULATION_SCORE = 99.0  # total domination...
 CAPITULATION_MONTHS = 12   # ...held this long forces capitulation
 
+# unrest & rebels
+REBEL_TAG = "REB"          # special hostile-to-all nation
+UNREST_MOVE_RATE = 0.15    # monthly drift toward the target unrest
+UNREST_STAB_COEF = 1.5     # unrest per point of negative stability
+UNREST_WE_COEF = 0.4       # unrest per point of war exhaustion
+UNREST_TEMPLE = 2.0        # unrest removed by a temple
+UNREST_MAX = 10.0
+UNREST_REVOLT_AT = 8.0     # revolts possible at or above this
+UNREST_WARN_AT = 6.0       # UI warns at or above this
+REVOLT_CHANCE_PER_POINT = 0.04  # monthly chance per point above 7
+UNREST_AFTER_REVOLT = 3.0
+REBEL_GRACE_MONTHS = 12    # rebel occupation before devastation starts
+
 # ------------------------------------------------------------------ terrain
 
 # key: (display name, map glyph, color tag, defender bonus, dev cost mult)

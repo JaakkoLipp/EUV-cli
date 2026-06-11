@@ -14,6 +14,9 @@ def can_pass(g: Game, tag: str, pid: int) -> bool:
     owner = g.provinces[pid].owner
     if owner == tag or owner in g.nations[tag].allies:
         return True
+    # overlord and vassal grant each other passage
+    if g.nations[tag].overlord == owner or g.nations[owner].overlord == tag:
+        return True
     if g.at_war_with(tag, owner):
         return True
     # co-belligerents: anyone on our side in any of our wars
@@ -333,6 +336,8 @@ def _maybe_reciprocate_rival(g: Game, actor: str, target: str):
 
 def offer_alliance(g: Game, tag: str, other: str):
     n, o = g.nations[tag], g.nations[other]
+    if n.overlord or o.overlord:
+        return False, "Vassals cannot form alliances."
     if other in n.allies:
         return False, "Already allied."
     if g.at_war_with(tag, other):
@@ -366,18 +371,57 @@ def break_alliance(g: Game, tag: str, other: str):
     return True, f"Alliance with {o.name} dissolved."
 
 
+def _find_cb(g: Game, tag: str, targets: list[str]) -> int | None:
+    """A fabricated claim or a core acts as a casus belli."""
+    n = g.nations[tag]
+    for ct in targets:
+        claim = next((pid for pid in sorted(n.claims)
+                      if g.provinces[pid].owner == ct), None)
+        if claim is None:
+            claim = next((p.pid for p in sorted(g.provinces_of(ct),
+                                                key=lambda p: p.pid)
+                          if tag in p.cores), None)
+        if claim is not None:
+            return claim
+    return None
+
+
+def _join_vassals(g: Game, side: list[str], other: list[str]):
+    """Vassals of everyone on `side` join that side automatically."""
+    for x in list(side):
+        for v in g.vassals_of(x):
+            if v in side or v in other:
+                continue
+            if any(g.at_war_with(v, e) for e in other):
+                continue
+            side.append(v)
+
+
 def declare_war(g: Game, tag: str, target: str,
-                coalition: list[str] | None = None):
-    n, t = g.nations[tag], g.nations[target]
+                coalition: list[str] | None = None,
+                independence: bool = False):
+    n = g.nations[tag]
+    if n.overlord and not (independence and target == n.overlord):
+        return False, "Vassals cannot declare wars."
+    if independence and target != n.overlord:
+        return False, "Independence wars can only target your overlord."
+    t = g.nations[target]
+    vassal_target: str | None = None     # war on a vassal hits the overlord
+    if t.overlord and not independence:
+        if t.overlord == tag:
+            return False, f"{t.name} is your vassal."
+        vassal_target = target
+        target = t.overlord
+        t = g.nations[target]
     if g.at_war_with(tag, target):
         return False, "Already at war."
     if g.truce_between(tag, target):
         return False, "A truce forbids war."
     if target in n.allies:
         break_alliance(g, tag, target)
-    claim = next((pid for pid in n.claims
-                  if g.provinces[pid].owner == target), None)
-    if claim is None:
+    claim = _find_cb(g, tag, [target] + ([vassal_target] if vassal_target
+                                         else []))
+    if claim is None and not independence:
         n.stability = max(data.MIN_STAB,
                           n.stability - data.WAR_STAB_HIT_NO_CB)
     attackers = [tag]
@@ -403,7 +447,15 @@ def declare_war(g: Game, tag: str, target: str,
                 player_cta = "def"
             else:
                 defenders.append(ally)
+    if independence:
+        # fellow vassals of the same overlord rise with the rebel
+        for v in g.vassals_of(target):
+            if v != tag and v not in attackers and v not in defenders:
+                attackers.append(v)
+    _join_vassals(g, attackers, defenders)
+    _join_vassals(g, defenders, attackers)
     w = g.new_war(attackers, defenders, claim)
+    w.independence = independence
     if player_cta:
         g.pending_events.append(
             {"cta": {"wid": w.wid, "side": player_cta,
@@ -412,6 +464,16 @@ def declare_war(g: Game, tag: str, target: str,
         g.pending_events.append({"war_decl": w.wid})
     if coalition:
         w.name = f"Coalition War against {t.name}"
+    if independence:
+        w.name = f"{n.name} War of Independence"
+    for x in attackers:
+        nx = g.nations[x]
+        if nx.is_player and nx.overlord and x != tag:
+            g.pending_events.append({"notice": {
+                "title": "Called to War",
+                "body": f"As a vassal of {g.nations[nx.overlord].name} "
+                        f"you are drawn into the {w.name} on the "
+                        f"attacking side."}})
     for x in attackers + defenders:
         g.nations[x].last_war_month = g.abs_month
     for x in attackers:
@@ -419,6 +481,9 @@ def declare_war(g: Game, tag: str, target: str,
             g.nations[y].opinions[x] = g.nations[y].opinion_of(x) - 50
     g.say("war", f"{n.name} declares war on {t.name}! "
                  f"({'+'.join(attackers)} vs {'+'.join(defenders)})")
+    if vassal_target:
+        return True, (f"War declared on {t.name}, overlord of "
+                      f"{g.nations[vassal_target].name}!")
     return True, f"War declared on {t.name}!"
 
 
@@ -469,33 +534,54 @@ def _tick_goal_score(g: Game, w: War):
 def province_peace_cost(g: Game, w: War, taker: str, pid: int) -> float:
     p = g.provinces[pid]
     cost = p.dev * 1.6
-    if pid in g.nations[taker].claims or pid == w.cb_target:
-        cost *= 0.6
+    if taker in p.cores:                 # reconquest of a core
+        cost *= data.CORE_PEACE_DISCOUNT
+    elif pid in g.nations[taker].claims or pid == w.cb_target:
+        cost *= data.CLAIM_PEACE_DISCOUNT
     if pid == g.nations[p.owner].capital:
         cost *= 1.5
     return cost
 
 
+def vassalize_cost(g: Game, loser: str) -> float:
+    """Warscore needed to demand vassalization of `loser`."""
+    return g.total_dev(loser) * data.VASSALIZE_DEV_MULT
+
+
 def offer_peace(g: Game, w: War, proposer: str, demand_pids: list[int],
                 demand_gold: float,
-                beneficiary: str | None = None) -> tuple[bool, str]:
+                beneficiary: str | None = None,
+                vassalize: bool = False) -> tuple[bool, str]:
     """proposer offers terms; beneficiary (default proposer) takes the spoils.
 
     beneficiary != proposer means the proposer is surrendering.
-    Empty demands = white peace. Returns (accepted, message).
+    Empty demands = white peace. vassalize replaces province demands:
+    the losing leader becomes the beneficiary's vassal (gold still
+    allowed). Returns (accepted, message).
     """
     beneficiary = beneficiary or proposer
     recipient = (w.defenders if w.side_of(proposer) == "att"
                  else w.attackers)[0]
+    if vassalize:
+        demand_pids = []                 # a vassalize peace takes no land
+        loser = (w.defenders if w.side_of(beneficiary) == "att"
+                 else w.attackers)[0]
+        if g.nations[loser].overlord:
+            return False, f"{g.nations[loser].name} is already a subject."
+        if g.nations[beneficiary].overlord:
+            return False, "A vassal cannot take subjects of its own."
     cost = sum(province_peace_cost(g, w, beneficiary, pid)
                for pid in demand_pids)
+    if vassalize:
+        cost += vassalize_cost(g, loser)
     cost += max(0.0, demand_gold) / data.PEACE_GOLD_PER_WARSCORE
     rec = g.nations[recipient]
     if rec.is_player:
         g.pending_events.append({
             "peace": {"wid": w.wid, "proposer": proposer,
                       "beneficiary": beneficiary, "pids": demand_pids,
-                      "gold": demand_gold, "cost": cost}})
+                      "gold": demand_gold, "cost": cost,
+                      "vassalize": vassalize}})
         return False, "Offer sent to their court..."
     rec_score = w.score_for(recipient)
     ben_score = w.score_for(beneficiary)
@@ -505,8 +591,8 @@ def offer_peace(g: Game, w: War, proposer: str, demand_pids: list[int],
         # we are being offered the spoils (enemy surrenders)
         accept = (cost >= rec_score - 15 or rec.war_exhaustion > 6
                   or rec_score < 5)
-        if not demand_pids and demand_gold <= 0:   # white peace
-            accept = rec_score < 15 or rec.war_exhaustion > 6
+        if not demand_pids and demand_gold <= 0 and not vassalize:
+            accept = rec_score < 15 or rec.war_exhaustion > 6  # white peace
         if not accept:
             return False, (f"{rec.name} rejects the offer; they demand "
                            f"more ({rec_score:.0f}% warscore).")
@@ -515,14 +601,15 @@ def offer_peace(g: Game, w: War, proposer: str, demand_pids: list[int],
         threshold = ben_score - (0 if desperate else 12)
         if ben_score >= 99:
             threshold = 100   # total victory: anything goes
-        if not demand_pids and demand_gold <= 0:
+        if not demand_pids and demand_gold <= 0 and not vassalize:
             if rec_score > 20 and not desperate:
                 return False, (f"{rec.name} rejects white peace; "
                                f"they are winning.")
         elif cost > threshold:
             return False, (f"{rec.name} rejects the terms ({cost:.0f}% "
                            f"asked, {ben_score:.0f}% warscore).")
-    execute_peace(g, w, beneficiary, demand_pids, demand_gold)
+    execute_peace(g, w, beneficiary, demand_pids, demand_gold,
+                  vassalize=vassalize)
     return True, "Peace concluded."
 
 

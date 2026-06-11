@@ -325,7 +325,10 @@ def _assign_nations(g: Game, rng: random.Random):
 
     tags = list(g.nations)
     for pid, i in assignment.items():
-        g.provinces[pid].owner = tags[i]
+        p = g.provinces[pid]
+        p.owner = tags[i]
+        p.cores.add(tags[i])           # initial owners core their land
+        p.owner_since = g.abs_month
 
     # capitals are developed; give every nation a starting army
     for tag, n in g.nations.items():

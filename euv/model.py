@@ -26,6 +26,9 @@ class Province:
     sieging: str | None = None      # tag currently sieging
     unrest: float = 0.0
     reb_months: int = 0             # consecutive months under rebel rule
+    # cores: tags with a permanent claim here; owner cores after 120 months
+    cores: set[str] = field(default_factory=set)
+    owner_since: int = 0            # abs month current owner took possession
 
     @property
     def fort_level(self) -> int:
@@ -37,6 +40,8 @@ class Province:
         income = self.dev * data.BASE_TAX_PER_DEV * mult + flat
         if self.occupier is not None:
             income *= 0.25
+        if self.owner and self.owner not in self.cores:
+            income *= data.NON_CORE_TAX_MULT   # overextension
         return income
 
     def manpower_cap(self) -> float:
@@ -83,6 +88,7 @@ class War:
     refusals: int = 0              # rejected offers (escalates AI demands)
     no_offers_until: int = 0       # abs month; cooldown after a refusal
     goal_score: float = 0.0        # ticking war-goal control, +/-20
+    independence: bool = False     # vassal (attacker) fighting its overlord
 
     def side_of(self, tag: str) -> str | None:
         if tag in self.attackers:
@@ -129,6 +135,9 @@ class Nation:
     in_coalition_against: str | None = None
     last_war_month: int = 0        # abs month a war last started/ended
     rivals: set[str] = field(default_factory=set)            # max 2 tags
+    overlord: str | None = None    # tag we are a vassal of
+    vassal_since: int = 0          # abs month vassalage began
+    annexing: tuple[str, int] | None = None    # (vassal tag, months left)
 
     def opinion_of(self, other: str) -> float:
         return self.opinions.get(other, 0.0)
@@ -210,11 +219,23 @@ class Game:
     def truce_between(self, a: str, b: str) -> bool:
         return self.nations[a].truces.get(b, 0) > self.abs_month
 
-    def nation_strength(self, tag: str) -> float:
-        """Rough military power score used by AI."""
+    def vassals_of(self, tag: str) -> list[str]:
+        return [t for t in sorted(self.nations)
+                if self.nations[t].alive and self.nations[t].overlord == tag]
+
+    def raw_strength(self, tag: str) -> float:
+        """Military power of one nation alone (no subjects counted)."""
         n = self.nations[tag]
         men = sum(a.men for a in self.armies_of(tag))
         return men + n.manpower * 0.5 + n.gold * 8
+
+    def nation_strength(self, tag: str) -> float:
+        """Rough military power score used by AI; overlords count their
+        vassals at a discount so war evaluation respects blocs."""
+        s = self.raw_strength(tag)
+        for v in self.vassals_of(tag):
+            s += self.raw_strength(v) * data.VASSAL_STRENGTH_SHARE
+        return s
 
     def war_name(self, attacker: str, defender: str) -> str:
         return (f"{self.nations[attacker].name}-"

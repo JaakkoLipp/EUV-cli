@@ -91,6 +91,23 @@ REVOLT_CHANCE_PER_POINT = 0.04  # monthly chance per point above 7
 UNREST_AFTER_REVOLT = 3.0
 REBEL_GRACE_MONTHS = 12    # rebel occupation before devastation starts
 
+# cores & overextension
+CORE_MONTHS = 120          # months of ownership before a province cores
+NON_CORE_TAX_MULT = 0.75   # tax penalty on non-cored provinces
+CORE_PEACE_DISCOUNT = 0.5  # peace cost multiplier when retaking a core
+CLAIM_PEACE_DISCOUNT = 0.6 # peace cost multiplier on claims / war goal
+CORE_RECONQUEST_AE = 0.5   # AE multiplier when retaking your core
+
+# vassals
+VASSAL_TRIBUTE_FRAC = 0.25     # share of positive net paid to overlord
+VASSALIZE_DEV_MULT = 1.2       # warscore cost = loser total dev * this
+VASSAL_AE_MULT = 0.5           # AE multiplier for vassalize / diplo-annex
+VASSAL_STRENGTH_SHARE = 0.6    # vassal strength counted for the overlord
+INDEPENDENCE_STRENGTH = 0.7    # vassal/overlord strength ratio to rebel
+INDEPENDENCE_CHANCE = 0.03     # monthly chance once strong enough
+ANNEX_VASSAL_MONTHS = 24       # integration time for diplomatic annexation
+ANNEX_MIN_VASSAL_MONTHS = 120  # vassalage required before integrating
+
 # ------------------------------------------------------------------ terrain
 
 # key: (display name, map glyph, color tag, defender bonus, dev cost mult)

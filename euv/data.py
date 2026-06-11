@@ -40,6 +40,20 @@ MORALE_BASE = 3.0
 WAR_EXHAUSTION_MONTHLY = 0.08
 PEACE_GOLD_PER_WARSCORE = 2.2
 
+# supply & attrition: doomstacks bleed.
+# A province supplies SUPPLY_BASE + ceil(dev * SUPPLY_PER_DEV) regiments,
+# adjusted by terrain (SUPPLY_TERRAIN below) and +SUPPLY_FRIENDLY_BONUS
+# when the province owner is the army's owner or an ally. All of one
+# nation's regiments in a province are summed against the limit; the
+# excess causes monthly manpower loss (never refunded to the pool).
+SUPPLY_BASE = 3
+SUPPLY_PER_DEV = 0.6
+SUPPLY_FRIENDLY_BONUS = 2    # own or allied territory supplies better
+SUPPLY_TERRAIN = {"mountains": -2, "desert": -2, "marsh": -1}
+ATTRITION_PER_EXCESS = 0.03  # men lost per 100% above the supply limit
+ATTRITION_HOSTILE = 0.01     # surcharge on soil of a nation at war with us
+ATTRITION_MAX = 0.10         # monthly attrition ceiling
+
 # peace pressure: holding out while beaten must hurt
 LOSING_BADLY = -50.0       # warscore at which war weariness accelerates
 REFUSAL_STAB_HIT = 1       # refusing a fair offer while losing

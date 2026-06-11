@@ -244,6 +244,14 @@ def handle_key(stdscr, g, pal, ui, k) -> bool:
         if ui.sel_aid in g.armies and g.armies[ui.sel_aid].owner == g.player:
             ok, msg = engine.split_army(g, ui.sel_aid)
             ui.status = msg
+    elif k == ord("i"):
+        if ui.sel_aid in g.armies and g.armies[ui.sel_aid].owner == g.player:
+            a = g.armies[ui.sel_aid]
+            a.reinforce = not a.reinforce
+            ui.status = (f"{a.name}: reinforcement "
+                         f"{'on' if a.reinforce else 'off'}.")
+        else:
+            ui.status = "Select one of your armies first (Tab)."
     elif k == ord("X"):
         if ui.sel_aid in g.armies and g.armies[ui.sel_aid].owner == g.player:
             if popup_menu(stdscr, pal, "Disband army?",

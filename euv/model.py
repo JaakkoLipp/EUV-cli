@@ -60,6 +60,7 @@ class Army:
     name: str = ""
     general: int = 0                # battle dice bonus, 0 = no general
     general_name: str = ""
+    reinforce: bool = True          # draw replacements from manpower
 
     @property
     def strength(self) -> float:

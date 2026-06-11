@@ -48,6 +48,7 @@ def save(g: Game, path: str = SAVE_PATH):
             "regiments": a.regiments, "men": a.men, "morale": a.morale,
             "move_target": a.move_target, "name": a.name,
             "general": a.general, "general_name": a.general_name,
+            "reinforce": a.reinforce,
         } for a in g.armies.values()],
         "wars": [{
             "wid": w.wid, "attackers": w.attackers, "defenders": w.defenders,
@@ -98,7 +99,8 @@ def load(path: str = SAVE_PATH) -> Game:
     for d in s["armies"]:
         a = Army(d["aid"], d["owner"], d["location"], d["regiments"],
                  d["men"], d["morale"], d["move_target"], d["name"],
-                 d.get("general", 0), d.get("general_name", ""))
+                 d.get("general", 0), d.get("general_name", ""),
+                 d.get("reinforce", True))
         g.armies[a.aid] = a
     for d in s["wars"]:
         w = War(d["wid"], d["attackers"], d["defenders"], d["cb_target"],

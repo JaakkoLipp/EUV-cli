@@ -633,7 +633,7 @@ def _transfer_province(g: Game, pid: int, to: str):
     p.occupier = None
     p.siege_progress = 0.0
     p.sieging = None
-    p.unrest = 4.0
+    p.unrest = data.UNREST_CONQUEST  # separatists: revolt risk for a while
     g.nations[to].claims.discard(pid)
     if old in g.nations:
         n = g.nations[old]
@@ -854,8 +854,14 @@ def _resolve_battle(g: Game, pid: int, side_a: list[Army],
     men_b = sum(b.men for b in side_b)
     mor_a = max((a.morale for a in side_a), default=0)
     mor_b = max((b.morale for b in side_b), default=0)
-    a_wins = (mor_a > 0 and men_a > 0) and (mor_b <= 0 or men_b <= 0 or
-                                            mor_a >= mor_b)
+    if men_a <= 0 or men_b <= 0:
+        a_wins = men_a > 0
+    elif mor_a <= 0 and mor_b <= 0:
+        a_wins = men_a >= men_b      # both broke: the bigger force holds
+    elif mor_a <= 0 or mor_b <= 0:
+        a_wins = mor_b <= 0
+    else:
+        a_wins = mor_a >= mor_b      # round cap reached
     winner, loser = (side_a, side_b) if a_wins else (side_b, side_a)
     wname, lname = (name_a, name_b) if a_wins else (name_b, name_a)
     lost_w = (men_a0 - men_a) if a_wins else (men_b0 - men_b)
@@ -886,11 +892,13 @@ def _resolve_battle(g: Game, pid: int, side_a: list[Army],
 
 def _apply_casualties(side: list[Army], dmg: float, enemy_roll: int):
     total = sum(a.men for a in side) or 1
+    # morale damage scales with the share of the side that just fell:
+    # outnumbered armies break first, numbers win battles.
+    loss = 0.12 + enemy_roll * 0.015 + 3.0 * (dmg / total)
     for a in side:
         share = a.men / total
         a.men = max(0, int(a.men - dmg * share))
-        a.morale = max(0.0, a.morale - (0.45 + enemy_roll * 0.06) * share
-                       * len(side))
+        a.morale = max(0.0, a.morale - loss)
 
 
 def _retreat(g: Game, a: Army):
@@ -1071,7 +1079,9 @@ def _unrest_phase(g: Game):
         if "temple" in p.buildings:
             target -= data.UNREST_TEMPLE
         target = max(0.0, min(data.UNREST_MAX, target))
-        p.unrest += (target - p.unrest) * data.UNREST_MOVE_RATE
+        rate = (data.UNREST_MOVE_RATE if target > p.unrest
+                else data.UNREST_DECAY_RATE)
+        p.unrest += (target - p.unrest) * rate
         p.unrest = max(0.0, min(data.UNREST_MAX, p.unrest))
         # devastation under prolonged rebel rule
         if p.occupier == data.REBEL_TAG:

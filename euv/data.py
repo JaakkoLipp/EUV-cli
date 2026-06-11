@@ -78,13 +78,15 @@ CAPITULATION_MONTHS = 12   # ...held this long forces capitulation
 
 # unrest & rebels
 REBEL_TAG = "REB"          # special hostile-to-all nation
-UNREST_MOVE_RATE = 0.15    # monthly drift toward the target unrest
+UNREST_MOVE_RATE = 0.15    # monthly drift when unrest is rising
+UNREST_DECAY_RATE = 0.04   # anger cools far slower than it rises
 UNREST_STAB_COEF = 1.5     # unrest per point of negative stability
 UNREST_WE_COEF = 0.4       # unrest per point of war exhaustion
 UNREST_TEMPLE = 2.0        # unrest removed by a temple
 UNREST_MAX = 10.0
 UNREST_REVOLT_AT = 8.0     # revolts possible at or above this
 UNREST_WARN_AT = 6.0       # UI warns at or above this
+UNREST_CONQUEST = 9.5      # separatist anger in a freshly taken province
 REVOLT_CHANCE_PER_POINT = 0.04  # monthly chance per point above 7
 UNREST_AFTER_REVOLT = 3.0
 REBEL_GRACE_MONTHS = 12    # rebel occupation before devastation starts

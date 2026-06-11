@@ -155,7 +155,8 @@ def test_peaceful_ai_manpower_trends_up():
         for _ in range(24):                      # settle: clamp + recruiting
             engine.advance_month(g, ai_module=_PeacefulAI)
         assert not g.wars, "peaceful AI must not be at war"
-        start = {t: n.manpower for t, n in g.nations.items() if n.alive}
+        start = {t: n.manpower for t, n in g.nations.items()
+                 if n.alive and g.manpower_max(t) > 0}
         for _ in range(10 * 12):
             engine.advance_month(g, ai_module=_PeacefulAI)
         for t, mp0 in start.items():

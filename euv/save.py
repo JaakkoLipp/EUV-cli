@@ -30,6 +30,7 @@ def save(g: Game, path: str = SAVE_PATH):
             "neighbors": sorted(p.neighbors), "coastal": p.coastal,
             "occupier": p.occupier, "siege_progress": p.siege_progress,
             "sieging": p.sieging, "unrest": p.unrest,
+            "reb_months": p.reb_months,
         } for p in g.provinces.values()],
         "nations": [{
             "tag": n.tag, "name": n.name, "culture": n.culture,
@@ -85,7 +86,8 @@ def load(path: str = SAVE_PATH) -> Game:
                      d["owner"], d["dev"], d["buildings"],
                      [tuple(c) for c in d["cells"]], tuple(d["center"]),
                      set(d["neighbors"]), d["coastal"], d["occupier"],
-                     d["siege_progress"], d["sieging"], d["unrest"])
+                     d["siege_progress"], d["sieging"], d["unrest"],
+                     d.get("reb_months", 0))
         g.provinces[p.pid] = p
     for d in s["nations"]:
         n = Nation(d["tag"], d["name"], d["culture"], d["color"],
@@ -99,6 +101,9 @@ def load(path: str = SAVE_PATH) -> Game:
                    d.get("last_war_month", (s["year"] - 5) * 12),
                    set(d.get("rivals", [])))
         g.nations[n.tag] = n
+    # saves from before the rebel system lack the REB nation
+    from . import worldgen
+    worldgen.make_rebels(g)
     for d in s["armies"]:
         a = Army(d["aid"], d["owner"], d["location"], d["regiments"],
                  d["men"], d["morale"], d["move_target"], d["name"],

@@ -74,6 +74,10 @@ but the real goal is survival and dominance on your own terms.
   over a goal resolve decisively instead of stalling forever.
 - **Aggressive expansion** — every conquest scares the neighbours.
   Push too fast and a hostile coalition will form and strike.
+- **Unrest & rebels** — negative stability, war exhaustion and fresh
+  conquests breed unrest (temples calm it). Provinces at high unrest
+  revolt, spawning rebel armies hostile to everyone; rebels besiege,
+  seize and slowly devastate provinces until an army retakes them.
 - **Missions** — rotating objectives (conquest, development, alliances…)
   that pay gold and prestige, and grant claims for conquest goals.
 - **A living world** — AI nations develop, ally, scheme, declare wars on

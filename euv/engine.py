@@ -579,7 +579,7 @@ def execute_peace(g: Game, w: War, winner: str, pids: list[int],
         terms.append(p.name)
         # aggressive expansion among everyone who isn't the winner
         for tag, n in g.nations.items():
-            if tag == winner or not n.alive:
+            if tag == winner or not n.alive or tag == data.REBEL_TAG:
                 continue
             dist = 1.0 if any(g.provinces[nb].owner == tag
                               for nb in p.neighbors) else 0.5
@@ -691,6 +691,7 @@ def advance_month(g: Game, ai_module=None):
     _economy_phase(g)
     _supply_attrition(g)
     _attrition_and_recovery(g)
+    _unrest_phase(g)
     _diplomacy_phase(g)
     for w in g.wars.values():
         _tick_goal_score(g, w)
@@ -796,6 +797,12 @@ def _battle_phase(g: Game):
     for pid, armies in by_loc.items():
         tags = {a.owner for a in armies}
         if len(tags) < 2:
+            continue
+        # rebels fight everyone: all other armies present unite vs them
+        rebs = [a for a in armies if a.owner == data.REBEL_TAG]
+        if rebs:
+            loyal = [a for a in armies if a.owner != data.REBEL_TAG]
+            _resolve_battle(g, pid, loyal, rebs)
             continue
         # group into two sides by the first war found
         sides: tuple[list[Army], list[Army]] | None = None
@@ -941,13 +948,22 @@ def _siege_phase(g: Game):
                 p.occupier = side_tag
                 g.nations[p.owner].war_exhaustion = min(
                     15.0, g.nations[p.owner].war_exhaustion + 0.6)
-                g.say("siege",
-                      f"{g.nations[side_tag].name} occupies {p.name}!")
+                if side_tag == data.REBEL_TAG:
+                    g.say("revolt", f"Rebels seize {p.name}!")
+                    if g.nations[p.owner].is_player:
+                        g.pending_events.append({"notice": {
+                            "title": "Province Lost to Rebels",
+                            "body": f"Rebels have seized {p.name}! Send "
+                                    f"an army to besiege and retake it "
+                                    f"before they lay it to waste."}})
+                else:
+                    g.say("siege",
+                          f"{g.nations[side_tag].name} occupies {p.name}!")
 
 
 def _economy_phase(g: Game):
     for tag, n in g.nations.items():
-        if not n.alive:
+        if not n.alive or tag == data.REBEL_TAG:
             continue
         income, expense, net = monthly_balance(g, tag)
         n.gold += net
@@ -993,7 +1009,7 @@ def _supply_attrition(g: Game):
 
 def _attrition_and_recovery(g: Game):
     for tag, n in g.nations.items():
-        if not n.alive:
+        if not n.alive or tag == data.REBEL_TAG:
             continue
         at_war = bool(g.wars_of(tag))
         regen = g.manpower_max(tag) / (data.MANPOWER_REGEN_YEARS * 12)
@@ -1029,26 +1045,68 @@ def _attrition_and_recovery(g: Game):
                           f"Claim fabricated on {g.provinces[pid].name}!")
             else:
                 n.fabricating = (pid, left - 1)
-    # army reinforcement & morale recovery
+    # army reinforcement & morale recovery (rebels never reinforce)
     for a in g.armies.values():
         n = g.nations[a.owner]
         full = a.regiments * data.RECRUIT_MANPOWER
-        if a.reinforce and a.men < full and n.manpower > 0:
+        if a.reinforce and a.owner != data.REBEL_TAG \
+                and a.men < full and n.manpower > 0:
             add = min(full - a.men, int(full * 0.08) + 20, int(n.manpower))
             a.men += add
             n.manpower -= add
         cap = morale_max(g, a.owner)
         hostile = g.at_war_with(a.owner, g.provinces[a.location].owner)
         a.morale = min(cap, a.morale + (0.2 if hostile else 0.4))
-    # unrest decay
+
+
+def _unrest_phase(g: Game):
+    """Unrest drifts toward owner-driven targets; hotspots revolt.
+
+    Provinces held by rebels for over a year start losing development.
+    """
     for p in g.provinces.values():
-        p.unrest = max(0.0, p.unrest - 0.1
-                       - (0.05 * g.nations[p.owner].stability))
+        n = g.nations[p.owner]
+        target = (data.UNREST_STAB_COEF * max(0, -n.stability)
+                  + data.UNREST_WE_COEF * n.war_exhaustion)
+        if "temple" in p.buildings:
+            target -= data.UNREST_TEMPLE
+        target = max(0.0, min(data.UNREST_MAX, target))
+        p.unrest += (target - p.unrest) * data.UNREST_MOVE_RATE
+        p.unrest = max(0.0, min(data.UNREST_MAX, p.unrest))
+        # devastation under prolonged rebel rule
+        if p.occupier == data.REBEL_TAG:
+            p.reb_months += 1
+            over = p.reb_months - data.REBEL_GRACE_MONTHS
+            if over > 0 and over % 12 == 0 and p.dev > 1:
+                p.dev -= 1
+                g.say("revolt", f"{p.name} is pillaged under rebel rule "
+                                f"(dev {p.dev}).")
+            continue
+        p.reb_months = 0
+        # revolt check
+        if p.unrest < data.UNREST_REVOLT_AT:
+            continue
+        chance = (p.unrest - 7.0) * data.REVOLT_CHANCE_PER_POINT
+        if g.rng.random() >= chance:
+            continue
+        regs = max(2, p.dev // 2)
+        a = g.new_army(data.REBEL_TAG, p.pid, regs)
+        a.name = f"{p.name} Rebels"
+        p.unrest = data.UNREST_AFTER_REVOLT
+        g.say("revolt", f"Revolt in {p.name}! {regs} rebel regiments "
+                        f"rise against {n.name}.")
+        if n.is_player:
+            g.pending_events.append({"notice": {
+                "title": "Revolt!",
+                "body": f"Rebels rise in {p.name}! {regs} regiments of "
+                        f"insurgents take the field. Crush them before "
+                        f"they entrench, or the province will fall to "
+                        f"rebel rule and waste away."}})
 
 
 def _diplomacy_phase(g: Game):
     for tag, n in g.nations.items():
-        if not n.alive:
+        if not n.alive or tag == data.REBEL_TAG:
             continue
         _rivals_phase(g, tag)
         # opinions drift toward 0, or toward -40 between rivals
@@ -1106,7 +1164,7 @@ def _rivals_phase(g: Game, tag: str):
 def _events_phase(g: Game):
     from . import data as d
     for tag, n in g.nations.items():
-        if not n.alive or g.rng.random() > 0.05:
+        if not n.alive or tag == d.REBEL_TAG or g.rng.random() > 0.05:
             continue
         ev = g.rng.choices(d.EVENTS, weights=[e[3] for e in d.EVENTS])[0]
         if n.is_player:
@@ -1127,7 +1185,7 @@ def apply_event_choice(g: Game, tag: str, ev, choice: int):
         n.manpower = max(0.0, n.manpower * (1 + fx["manpower_frac"]))
     if "ae" in fx:
         for o in g.nations.values():
-            if o.tag != tag and o.alive:
+            if o.tag != tag and o.alive and o.tag != data.REBEL_TAG:
                 o.ae[tag] = o.ae.get(tag, 0) + fx["ae"] * 0.3
     if fx.get("dev_capital"):
         g.provinces[n.capital].dev += fx["dev_capital"]
